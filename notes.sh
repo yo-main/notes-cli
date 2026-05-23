@@ -14,7 +14,7 @@ priority: medium
 
   echo "$template" > "$note_tmp_file"
 
-  alacritty -T "new-note" -e hx "$note_tmp_file" +4
+  open_file "$note_tmp_file" +4
 
   title=$(sed -n "4p" "$note_tmp_file" | tr -d '[:space:]')
   if [[ "$title" == "#" ]]; then
@@ -83,7 +83,37 @@ function mark_note_as_done() {
   echo -e "$done" > "$DONE"
 }
 
-function show_notes() {
+function view_note() {
+  view_id="$1"
+
+  get_todo_notes
+
+  note_tmp_file=$(mktemp)
+
+  for note in "${notes[@]}"; do
+    note_id=$(echo "$note" | grep "id: ")
+    if [[ "${note_id:4}" == "$view_id" ]]; then
+      echo -e "${note}" > "$note_tmp_file"
+      break
+    fi
+  done
+
+  open_file "$note_tmp_file" +5
+
+  todo=""
+  for note in "${notes[@]}"; do
+    note_id=$(echo "$note" | grep "id: ")
+    if [[ "${note_id:4}" == "$view_id" ]]; then
+      todo="$(cat "$note_tmp_file")\n---\n${todo}"
+    else
+      todo="$(echo "$note")\n---\n${todo}"
+    fi
+  done
+
+  echo -e "$todo"
+}
+
+function list_notes() {
   get_todo_notes
 
   note_tmp_file=$(mktemp)
@@ -94,9 +124,17 @@ function show_notes() {
     printf "[] %s - %s\n"  "${note_id:4}" "${title:2}" >> "$note_tmp_file"
   done
 
-  alacritty -T "new-note" -e hx "$note_tmp_file"
+  open_file "$note_tmp_file"
 
   mark_note_as_done "$note_tmp_file"
+}
+
+
+function open_file() {
+  file="$1"
+  shift
+  alacritty -T "new-note" -e hx --config ~/.config/notes/helix.config.toml "$file" "$@"
+  
 }
 
 case "$1" in
@@ -110,9 +148,14 @@ case "$1" in
     new_note "$@"
     ;;
 
-  --show)
+  --list)
     shift 1
-    show_notes "$@"
+    list_notes "$@"
+    ;;
+
+  --view)
+    shift 1
+    view_note "$@"
     ;;
 
   *)
