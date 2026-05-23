@@ -120,11 +120,13 @@ function open_note() {
   for note in "${notes[@]}"; do
     note_id=$(echo "$note" | grep "id: ")
     if [[ "${note_id:4}" == "$view_id" ]]; then
-      todo="$(cat "$note_tmp_file")\n---\n${todo}"
+      todo="$todo"\n---\n$(cat "$note_tmp_file")"
     else
       todo="$(echo "$note")\n---\n${todo}"
     fi
   done
+
+  echo "$todo" > "$TODO"
 }
 
 function list_notes() {
