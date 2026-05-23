@@ -93,6 +93,22 @@ function view_note() {
   for note in "${notes[@]}"; do
     note_id=$(echo "$note" | grep "id: ")
     if [[ "${note_id:4}" == "$view_id" ]]; then
+      echo -e "$note"
+      break
+    fi
+  done
+}
+
+function open_note() {
+  view_id="$1"
+
+  get_todo_notes
+
+  note_tmp_file=$(mktemp)
+
+  for note in "${notes[@]}"; do
+    note_id=$(echo "$note" | grep "id: ")
+    if [[ "${note_id:4}" == "$view_id" ]]; then
       echo -e "${note}" > "$note_tmp_file"
       break
     fi
@@ -109,8 +125,6 @@ function view_note() {
       todo="$(echo "$note")\n---\n${todo}"
     fi
   done
-
-  echo -e "$todo"
 }
 
 function list_notes() {
@@ -139,23 +153,28 @@ function open_file() {
 
 case "$1" in
 
-  --help)
+  help)
     echo help is to be implemented
     ;;
 
-  --new)
+  new)
     shift 1
     new_note "$@"
     ;;
 
-  --list)
+  list)
     shift 1
     list_notes "$@"
     ;;
 
-  --view)
+  view)
     shift 1
     view_note "$@"
+    ;;
+
+  "open-note")
+    shift 1
+    open_note "$@"
     ;;
 
   *)
