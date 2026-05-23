@@ -50,18 +50,53 @@ function get_todo_notes() {
   )
 }
 
+function mark_note_as_done() {
+  todo_file="$1"
+
+  done_ids=$(cat "$todo_file" | grep "[x]" | awk '{print $2}')
+
+  get_todo_notes
+
+  todo=""
+  done=$(cat "$DONE")
+
+  for note in "${notes[@]}"; do
+    note_id=$(echo "$note" | grep "id: ")
+    note_id=${note_id:4}
+    marked_as_done=0
+
+    for done_id in "${done_ids[@]}"; do
+      if [[ "$done_id" == "$note_id" ]]; then
+        done="${note}\n---\n${done}"
+        marked_as_done=1
+        break
+      fi
+    done
+
+    if [[ "$marked_as_done" == 0 ]]; then
+        todo="${note}\n---\n${todo}"
+    fi
+    
+  done
+
+  echo -e "$todo" > "$TODO"
+  echo -e "$done" > "$DONE"
+}
+
 function show_notes() {
   get_todo_notes
 
   note_tmp_file=$(mktemp)
 
   for note in "${notes[@]}"; do
-    title="${note#*# }"
-    echo "[] ${title}" >> "$note_tmp_file"
+    title=$(echo "$note" | grep "# ")
+    note_id=$(echo "$note" | grep "id: ")
+    printf "[] %s - %s\n"  "${note_id:4}" "${title:2}" >> "$note_tmp_file"
   done
 
   alacritty -T "new-note" -e hx "$note_tmp_file"
 
+  mark_note_as_done "$note_tmp_file"
 }
 
 case "$1" in
