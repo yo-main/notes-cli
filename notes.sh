@@ -86,14 +86,16 @@ function list_notes() {
     todo_format "$tag" \
       | fzf \
           -m \
+          --ansi \
           --with-nth=2.. \
           --delimiter=$'\t' \
           --preview="glow -s dark $NOTES_FOLDER/{1}" \
-          --preview-window=bottom \
+          --preview-window='bottom,border-top,~3' \
           --prompt="todos> " \
-          --bind "enter:execute(notes open-note {1})" \
+          --bind "enter:execute-silent(notes open-note {1})+refresh-preview" \
           --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format ${tag})" \
-          --bind "ctrl-n:become(notes new)" \
+          --bind "ctrl-n:execute-silent(notes new)+reload(notes todo-format ${tag})" \
+          --header "ctrl+space: mark as done - ctrl+n: new note - enter: open note"
           # --preview="bat --color=always $NOTES_FOLDER/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $NOTES_FOLDER/)+reload($LIST_CMD)" \
   )
