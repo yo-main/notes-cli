@@ -56,7 +56,7 @@ function list_notes() {
           --preview-window=bottom \
           --prompt="todos> " \
           --bind "enter:execute(notes open-note {1})" \
-          --bind "ctrl-o:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format)" \
+          --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format)" \
           --bind "ctrl-n:become(notes new)"
           # --preview="bat --color=always $TODO/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $TODO/)+reload($LIST_CMD)" \
