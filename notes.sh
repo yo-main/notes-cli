@@ -1,16 +1,37 @@
 #! /usr/bin/env bash
 
+CONFIG=~/.config/notes/config.json
 NOTES_FOLDER=~/.config/notes/data/
+
+function is_todo() {
+  tags="$@"
+  for tag in "${tags[@]}"; do
+    if [[ "$tag" == "todo" ]]; then
+      echo 1
+      return
+    fi
+  done
+
+  echo 0
+}
 
 function new_note() {
   tags="$@"
+
+  is_todo "$tags"
 
   id="$(uuidgen | cut -c1-8)"
   filename="$NOTES_FOLDER/$id.md"
 
   template="---
-created: $(date --iso)
-priority: medium
+created: $(date --iso)"
+
+  if [[ "$is_todo" == 1 ]]; then
+    template ="${template}
+priority: medium"
+  fi
+
+  template="${template}
 tags:"
 
   if [[ -n "$tags" ]]; then
@@ -27,7 +48,7 @@ tags:"
 
   echo "$template" > "$filename"
 
-  open_file "$filename" +4
+  open_file "$filename" +100
 
   title=$(tail -n 1 "$filename" | tr -d '[:space:]')
   if [[ "$title" == "#" ]]; then
@@ -70,11 +91,14 @@ function todo_format() {
       continue
     fi
 
-    priority="$(echo "$file_content" | grep "^priority: " | cut -d' ' -f2)"
     title="$(echo "$file_content" | grep "^# " | head -1 | cut -c3-)"
+    priority="$(echo "$file_content" | grep "^priority: " | cut -d' ' -f2)"
 
-    # tag_display=$(printf "#%s " "${tags[@]}")
-    printf "%s\t[%s] %s \n" "$filename" "$priority" "$title"
+    if [[ -n "$priority" ]]; then
+      printf "%s\t[%s] %s \n" "$filename" "$priority" "$title"
+    else
+      printf "%s\t %s \n" "$filename" "$title"
+    fi
 
   done
 }
@@ -95,7 +119,7 @@ function list_notes() {
           --bind "enter:execute-silent(notes open-note {1})+refresh-preview" \
           --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format ${tag})" \
           --bind "ctrl-n:execute-silent(notes new)+reload(notes todo-format ${tag})" \
-          --header "ctrl+space: mark as done - ctrl+n: new note - enter: open note"
+          --footer "ctrl+space: mark as done - ctrl+n: new note - enter: open note"
           # --preview="bat --color=always $NOTES_FOLDER/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $NOTES_FOLDER/)+reload($LIST_CMD)" \
   )
@@ -114,6 +138,27 @@ function open_file() {
   alacritty -T "new-note" -e hx --config ~/.config/notes/helix.config.toml "$file" "$@"
   
 }
+
+function sync_git() {
+  jj --repository "$NOTES_FOLDER" st &> /dev/null || return
+
+  branch=$(jj log -r 'heads(::@ & bookmarks())' --no-graph -T 'bookmarks')
+
+  diff=$(jj --repository "$NOTES_FOLDER" diff)
+
+  if [ -n "$diff" ]; then
+    jj --repository ~/notes git fetch
+    jj --repository ~/notes rebase -d ${branch}@origin
+
+    commit_msg="$(date +'%Y-%m-%d') - to describe"
+    jj --repository ~/notes commit -m "${commit_msg}"
+
+    jj --repository ~/notes b m ${branch} --to @-
+    jj --repository ~/notes git push
+  fi
+}
+
+sync_git &>/dev/null & disown
 
 case "$1" in
 
@@ -151,6 +196,5 @@ case "$1" in
     ;;
 
 esac
-
 
 
