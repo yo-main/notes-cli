@@ -8,8 +8,11 @@ function new_note() {
   id="$(uuidgen | cut -c1-8)"
   filename="$TODO/$id.md"
 
-  template="date: $(date --iso)
+  template="---
+created: $(date --iso)
 priority: medium
+tags:
+---
 
 #"
 
@@ -24,25 +27,6 @@ priority: medium
   fi
 }
 
-
-function mark_note_as_done() {
-  todo_file="$1"
-
-  done_ids=$(cat "$todo_file" | grep "[x]" | awk '{print $2}')
-
-  todos=$(ls "$TODO")
-
-  todo=""
-
-  for filename in "${todos[@]}"; do
-    for done_id in "${done_ids[@]}"; do
-      if [[ "$done_id" == "${filename:-3}" ]]; then
-        note_done "$filename"
-        break
-      fi
-    done
-  done
-}
 
 function open_note() {
   view_id="$1"
@@ -68,7 +52,7 @@ function list_notes() {
           -m \
           --with-nth=2 \
           --delimiter=$'\t' \
-          --preview="glow -p -s dark $TODO/{1}" \
+          --preview="glow -s dark $TODO/{1}" \
           --preview-window=bottom \
           --prompt="todos> " \
           --bind "enter:execute(notes open-note {1})" \
@@ -85,6 +69,10 @@ function note_done() {
   filename="$1"
 
   mv "$TODO/$filename" "$DONE/$filename"
+
+  sed -i "1a\
+done: $(date --iso)
+" "$DONE/$filename"
 }
 
 
