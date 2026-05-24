@@ -34,30 +34,57 @@ function open_note() {
 }
 
 
+
 function todo_format() {
+  tag_to_filter="$1"
+
   for path in "$TODO"/*; do
     [[ -f "$path" ]] || continue
 
     filename="$(basename "$path")"
-    priority="$(grep "^priority: " "$path" | cut -d' ' -f2)"
-    title="$(grep "^# " "$path" | head -1 | cut -c3-)"
-    printf "%s\t[%s] %s\n" "$filename" "$priority" "$title"
+    file_content=$(cat "$path")
+    print=0
+
+    if [[ -z "$tag_to_filter" ]]; then
+      print=1
+    else
+      mapfile -t tags < <(echo "$file_content" | grep -A10 "^tags:" | grep "\- " | sed "s/\- //" | tr -d ' ')
+        
+      for tag in "${tags[@]}"; do
+        if [[ "$tag" == "$tag_to_filter" ]]; then
+          print=1
+        fi
+      done
+    fi
+
+    if [[ "$print" == 0 ]]; then
+      continue
+    fi
+
+    priority="$(echo "$file_content" | grep "^priority: " | cut -d' ' -f2)"
+    title="$(echo "$file_content" | grep "^# " | head -1 | cut -c3-)"
+
+    # tag_display=$(printf "#%s " "${tags[@]}")
+    printf "%s\t[%s] %s \n" "$filename" "$priority" "$title"
+
   done
 }
 
 function list_notes() {
+  tag="$1"
+
   selected=$(
-    todo_format \
+    todo_format "$tag" \
       | fzf \
           -m \
-          --with-nth=2 \
+          --with-nth=2.. \
           --delimiter=$'\t' \
           --preview="glow -s dark $TODO/{1}" \
           --preview-window=bottom \
           --prompt="todos> " \
           --bind "enter:execute(notes open-note {1})" \
           --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format)" \
-          --bind "ctrl-n:become(notes new)"
+          --bind "ctrl-n:become(notes new)" \
           # --preview="bat --color=always $TODO/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $TODO/)+reload($LIST_CMD)" \
   )
