@@ -1,13 +1,12 @@
 #! /usr/bin/env bash
 
-TODO=~/.config/notes/data/todo
-DONE=~/.config/notes/data/done
+NOTES_FOLDER=~/.config/notes/data/
 
 function new_note() {
   tags="$@"
 
   id="$(uuidgen | cut -c1-8)"
-  filename="$TODO/$id.md"
+  filename="$NOTES_FOLDER/$id.md"
 
   template="---
 created: $(date --iso)
@@ -17,7 +16,7 @@ tags:"
   if [[ -n "$tags" ]]; then
     for tag in "${tags[@]}"; do
       template="${template}
-- ${tag}"
+  - ${tag}"
     done
   fi
 
@@ -40,7 +39,7 @@ tags:"
 
 function open_note() {
   view_id="$1"
-  open_file "$TODO/$view_id" +4
+  open_file "$NOTES_FOLDER/$view_id" +4
 }
 
 
@@ -48,7 +47,7 @@ function open_note() {
 function todo_format() {
   tag_to_filter="$1"
 
-  for path in "$TODO"/*; do
+  for path in "$NOTES_FOLDER"/*; do
     [[ -f "$path" ]] || continue
 
     filename="$(basename "$path")"
@@ -89,27 +88,21 @@ function list_notes() {
           -m \
           --with-nth=2.. \
           --delimiter=$'\t' \
-          --preview="glow -s dark $TODO/{1}" \
+          --preview="glow -s dark $NOTES_FOLDER/{1}" \
           --preview-window=bottom \
           --prompt="todos> " \
           --bind "enter:execute(notes open-note {1})" \
-          --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format)" \
+          --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format ${tag})" \
           --bind "ctrl-n:become(notes new)" \
-          # --preview="bat --color=always $TODO/{1}" \
-          # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $TODO/)+reload($LIST_CMD)" \
+          # --preview="bat --color=always $NOTES_FOLDER/{1}" \
+          # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $NOTES_FOLDER/)+reload($LIST_CMD)" \
   )
-
-  # mark_note_as_done "$note_tmp_file"
 }
 
 function note_done() {
   filename="$1"
 
-  mv "$TODO/$filename" "$DONE/$filename"
-
-  sed -i "1a\
-done: $(date --iso)
-" "$DONE/$filename"
+  sed -i "s/- todo$/- done/g" "$NOTES_FOLDER/$filename"
 }
 
 
