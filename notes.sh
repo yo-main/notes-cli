@@ -1,7 +1,8 @@
 #! /usr/bin/env bash
 
-CONFIG=~/.config/notes/config.json
-NOTES_FOLDER=~/.config/notes/data/
+BASE_FOLDER="$HOME/.config/notes"
+CONFIG="$BASE_FOLDER/config.json"
+NOTES_FOLDER="$BASE_FOLDER/data"
 
 function is_todo() {
   tags="$@"
@@ -60,7 +61,16 @@ tags:"
 
 function open_note() {
   view_id="$1"
-  open_file "$NOTES_FOLDER/$view_id" +4
+  open_file "$NOTES_FOLDER/$view_id" +100
+}
+
+function clone_note() {
+  view_id="$1"
+
+  id="$(uuidgen | cut -c1-8)"
+  cp "$NOTES_FOLDER/$view_id" "$NOTES_FOLDER/$id.md"
+
+  open_file "$NOTES_FOLDER/$id.md" +100
 }
 
 
@@ -119,7 +129,8 @@ function list_notes() {
           --bind "enter:execute-silent(notes open-note {1})+refresh-preview" \
           --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format ${tag})" \
           --bind "ctrl-n:execute-silent(notes new)+reload(notes todo-format ${tag})" \
-          --footer "ctrl+space: mark as done - ctrl+n: new note - enter: open note"
+          --bind "ctrl-b:execute-silent(notes clone-note {1})+reload(notes todo-format ${tag})" \
+          --footer "ctrl+space: mark as done - ctrl+n: new note - enter: open note - ctrl-enter: clone a note"
           # --preview="bat --color=always $NOTES_FOLDER/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $NOTES_FOLDER/)+reload($LIST_CMD)" \
   )
@@ -140,21 +151,21 @@ function open_file() {
 }
 
 function sync_git() {
-  jj --repository "$NOTES_FOLDER" st &> /dev/null || return
+  jj --repository "$BASE_FOLDER" st &> /dev/null || return
 
-  branch=$(jj log -r 'heads(::@ & bookmarks())' --no-graph -T 'bookmarks')
+  branch=$(cat "$CONFIG" | jq -r '.git_branch // "main"')
 
-  diff=$(jj --repository "$NOTES_FOLDER" diff)
+  diff=$(jj --repository "$BASE_FOLDER" diff)
 
   if [ -n "$diff" ]; then
-    jj --repository ~/notes git fetch
-    jj --repository ~/notes rebase -d ${branch}@origin
+    jj --repository "$BASE_FOLDER" git fetch
+    jj --repository "$BASE_FOLDER" rebase -d ${branch}@origin
 
     commit_msg="$(date +'%Y-%m-%d') - to describe"
-    jj --repository ~/notes commit -m "${commit_msg}"
+    jj --repository "$BASE_FOLDER" commit -m "${commit_msg}"
 
-    jj --repository ~/notes b m ${branch} --to @-
-    jj --repository ~/notes git push
+    jj --repository "$BASE_FOLDER" b m ${branch} --to @-
+    jj --repository "$BASE_FOLDER" git push -b ${branch}
   fi
 }
 
@@ -189,6 +200,16 @@ case "$1" in
   "open-note")
     shift 1
     open_note "$@"
+    ;;
+
+  "clone-note")
+    shift 1
+    clone_note "$@"
+    ;;
+
+  "sync")
+    shift 1
+    sync_git 
     ;;
 
   *)
