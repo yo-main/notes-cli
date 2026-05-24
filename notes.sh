@@ -44,14 +44,9 @@ function mark_note_as_done() {
   done
 }
 
-function view_note() {
-  view_id="$1"
-  echo -e $(cat "${TODO}/${view_id}.md")
-}
-
 function open_note() {
   view_id="$1"
-  open_file "$TODO/$view_id.md" +4
+  open_file "$TODO/$view_id" +4
 }
 
 
@@ -62,27 +57,24 @@ function todo_format() {
     filename="$(basename "$path")"
     priority="$(grep "^priority: " "$path" | cut -d' ' -f2)"
     title="$(grep "^# " "$path" | head -1 | cut -c3-)"
-    printf "%s\t[%s] %s\n" "${filename:-3}" "$priority" "$title"
+    printf "%s\t[%s] %s\n" "$filename" "$priority" "$title"
   done
 }
 
 function list_notes() {
-  todos=$(ls "$TODO")
-
-  note_tmp_file=$(mktemp)
-
   selected=$(
     todo_format \
       | fzf \
           -m \
           --with-nth=2 \
           --delimiter=$'\t' \
-          --preview="bat --color=always $TODO/{1}" \
+          --preview="glow -p -s dark $TODO/{1}" \
           --preview-window=bottom \
           --prompt="todos> " \
           --bind "enter:execute(notes open-note {1})" \
           --bind "ctrl-o:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format)" \
           --bind "ctrl-n:become(notes new)"
+          # --preview="bat --color=always $TODO/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $TODO/)+reload($LIST_CMD)" \
   )
 
@@ -117,11 +109,6 @@ case "$1" in
   list)
     shift 1
     list_notes "$@"
-    ;;
-
-  view)
-    shift 1
-    view_note "$@"
     ;;
 
   done)
