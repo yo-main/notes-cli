@@ -1,12 +1,12 @@
 #! /usr/bin/env bash
 
-TODO=./data/todo
-DONE=./data/done
+TODO=~/.config/notes/data/todo
+DONE=~/.config/notes/data/done
 
 function new_note() {
 
   id="$(uuidgen | cut -c1-8)"
-  filename="$TODO/$id"
+  filename="$TODO/$id.md"
 
   template="date: $(date --iso)
 priority: medium
@@ -36,8 +36,8 @@ function mark_note_as_done() {
 
   for filename in "${todos[@]}"; do
     for done_id in "${done_ids[@]}"; do
-      if [[ "$done_id" == "$filename" ]]; then
-        mv "$TODO/$filename" "$DONE/$filename"
+      if [[ "$done_id" == "${filename:-3}" ]]; then
+        note_done "$filename"
         break
       fi
     done
@@ -46,20 +46,24 @@ function mark_note_as_done() {
 
 function view_note() {
   view_id="$1"
-
-  todos=$(ls "$TODO")
-
-  for filename in "${todos[@]}"; do
-    if [[ "${filename}" == "$view_id" ]]; then
-      echo -e $(cat "$TODO/$filename")
-      break
-    fi
-  done
+  echo -e $(cat "${TODO}/${view_id}.md")
 }
 
 function open_note() {
   view_id="$1"
-  open_file "$TODO/$view_id" +4
+  open_file "$TODO/$view_id.md" +4
+}
+
+
+function todo_format() {
+  for path in "$TODO"/*; do
+    [[ -f "$path" ]] || continue
+
+    filename="$(basename "$path")"
+    priority="$(grep "^priority: " "$path" | cut -d' ' -f2)"
+    title="$(grep "^# " "$path" | head -1 | cut -c3-)"
+    printf "%s\t[%s] %s\n" "${filename:-3}" "$priority" "$title"
+  done
 }
 
 function list_notes() {
@@ -67,19 +71,28 @@ function list_notes() {
 
   note_tmp_file=$(mktemp)
 
-  for filename in "${todos[@]}"; do
-    if [[ -z "$filename" ]]; then
-      echo "No notes"
-      return
-    fi
+  selected=$(
+    todo_format \
+      | fzf \
+          -m \
+          --with-nth=2 \
+          --delimiter=$'\t' \
+          --preview="bat --color=always $TODO/{1}" \
+          --preview-window=bottom \
+          --prompt="todos> " \
+          --bind "enter:execute(notes open-note {1})" \
+          --bind "ctrl-o:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format)" \
+          --bind "ctrl-n:become(notes new)"
+          # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $TODO/)+reload($LIST_CMD)" \
+  )
 
-    title=$(cat "$TODO/$filename" | grep "# ")
-    printf "[] %s - %s\n"  "${filename}" "${title:2}" >> "$note_tmp_file"
-  done
+  # mark_note_as_done "$note_tmp_file"
+}
 
-  open_file "$note_tmp_file"
+function note_done() {
+  filename="$1"
 
-  mark_note_as_done "$note_tmp_file"
+  mv "$TODO/$filename" "$DONE/$filename"
 }
 
 
@@ -109,6 +122,16 @@ case "$1" in
   view)
     shift 1
     view_note "$@"
+    ;;
+
+  done)
+    shift 1
+    note_done "$@"
+    ;;
+
+  "todo-format")
+    shift 1
+    todo_format "$@"
     ;;
 
   "open-note")
