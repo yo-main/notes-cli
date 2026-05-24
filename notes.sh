@@ -4,6 +4,7 @@ TODO=~/.config/notes/data/todo
 DONE=~/.config/notes/data/done
 
 function new_note() {
+  tags="$@"
 
   id="$(uuidgen | cut -c1-8)"
   filename="$TODO/$id.md"
@@ -11,7 +12,16 @@ function new_note() {
   template="---
 created: $(date --iso)
 priority: medium
-tags:
+tags:"
+
+  if [[ -n "$tags" ]]; then
+    for tag in "${tags[@]}"; do
+      template="${template}
+- ${tag}"
+    done
+  fi
+
+  template="${template}
 ---
 
 #"
@@ -20,7 +30,7 @@ tags:
 
   open_file "$filename" +4
 
-  title=$(sed -n "4p" "$filename" | tr -d '[:space:]')
+  title=$(tail -n 1 "$filename" | tr -d '[:space:]')
   if [[ "$title" == "#" ]]; then
     rm "$filename"
     return
