@@ -4,22 +4,11 @@ BASE_FOLDER="$HOME/.config/notes"
 CONFIG="$BASE_FOLDER/config.json"
 NOTES_FOLDER="$BASE_FOLDER/data"
 
-function is_todo() {
-  tags="$@"
-  for tag in "${tags[@]}"; do
-    if [[ "$tag" == "todo" ]]; then
-      echo 1
-      return
-    fi
-  done
-
-  echo 0
-}
 
 function new_note() {
   tags="$@"
 
-  is_todo "$tags"
+  is_todo=$(contains "todo" $tags)
 
   id="$(uuidgen | cut -c1-8)"
   filename="$NOTES_FOLDER/$id.md"
@@ -28,7 +17,7 @@ function new_note() {
 created: $(date --iso)"
 
   if [[ "$is_todo" == 1 ]]; then
-    template ="${template}
+    template="${template}
 priority: medium"
   fi
 
@@ -73,8 +62,22 @@ function clone_note() {
   open_file "$NOTES_FOLDER/$id.md" +100
 }
 
+function contains() {
+  target="$1"
+  shift
+  values="$@"
 
+  for value in ${values[@]}; do
+    if [[ "${value,,}" == "${target,,}" ]]; then
+      echo 1
+      return
+    fi
+  done
 
+  echo 0
+}
+
+ 
 function todo_format() {
   tags_to_filter="$@"
 
@@ -82,23 +85,15 @@ function todo_format() {
     [[ -f "$path" ]] || continue
 
     filename="$(basename "$path")"
-    file_content=$(cat "$path")
+    file_content=$(cat "$path" )
+    metadata=$(sed -n '/^---$/,/^---$/{/^---$/d; p; }' "$path")
 
-    mapfile -t tags < <(echo "$file_content" | grep -A10 "^tags:" | grep "\- " | sed "s/\- //" | tr -d ' ')
+    tags=$(echo "$metadata" | awk '/^tags:/{f=1;next} f&&/^[[:space:]]*-[[:space:]]*/{sub(/^[[:space:]]*-[[:space:]]*/,"");print;next} f{exit}')
       
     print=1
 
     for tag_to_filter in $tags_to_filter; do
-      found=0
-
-      for tag in "${tags[@]}"; do
-        if [[ "$tag" == "$tag_to_filter" ]]; then
-          found=1
-          break
-        fi
-      done
-
-      if [[ "$found" == 0 ]]; then
+      if [[ $(contains "$tag_to_filter" ${tags}) == 0 ]]; then
         print=0
         break
       fi
