@@ -119,7 +119,7 @@ function list_notes() {
   tag="$@"
 
   selected=$(
-    todo_format "$tag" \
+    ./format_notes.py --notes-folder "$NOTES_FOLDER" --filters "$tag" \
       | fzf \
           -m \
           --ansi \
@@ -148,7 +148,7 @@ function note_done() {
 function open_file() {
   file="$1"
   shift
-  alacritty -T "new-note" -e hx --config ~/.config/notes/helix.config.toml "$file" "$@"
+  alacritty -T "new-note" -e hx --config ~/.config/notes/helix.config.toml "$file" "${@:-}"
   
 }
 
@@ -196,7 +196,7 @@ case "$1" in
 
   "todo-format")
     shift 1
-    todo_format "$@"
+    ./format_notes.py --notes-folder "$NOTES_FOLDER" --filters "${@:-}"
     ;;
 
   "open-note")

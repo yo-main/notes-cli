@@ -1,0 +1,11 @@
+[project]
+name = "notes"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "aiofile>=3.11.1",
+    "pyyaml>=6.0.3",
+    "typer>=0.25.1",
+]
