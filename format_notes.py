@@ -12,24 +12,26 @@ import aiofile
 import yaml
 from pathlib import Path
 
+def get_attr_safe(values: list, index: int) -> str:
+    try:
+        return values[index]
+    except IndexError:
+        return ""
+
 def main(notes_folder: Path = Path("~/.config/notes/data"), filters: list[str] = []) -> list[str]:
     filters = [f for f in filters if f]
     return asyncio.run(format_tags(notes_folder, filters))
 
-def print_for_fzf(path: Path, data: dict) -> None:
+def print_for_fzf(path: Path, data: dict) -> list[str]:
     tags = data.get("tags", [])
-    title = data["title"]
+    title: str = data["title"]
+    created = data["created"]
 
-    def get_tags_attr(index: int) -> str:
-        try:
-            return tags[index]
-        except KeyError:
-            return ""
 
     if priority := data.get("priority", []):
-        print(f"{path.name}\t[{priority}]\t{title}", end="")
+        return [path.name,"\t", f"[{created}]", "\t", f"[{priority}]", " ", f"#{get_attr_safe(tags, 0)}", "\t", title]
     else:
-        print(f"{path.name}\t#{get_tags_attr(0)} #{get_tags_attr(1)}\t{title}", end="")
+        return [path.name,"\t", f"[{created}]", "\t", f"#{get_attr_safe(tags, 0)}", " ", f"#{get_attr_safe(tags, 1)}", "\t", title]
     
 
 async def get_file_metadata(path: Path) -> dict:
@@ -51,25 +53,37 @@ async def get_file_metadata(path: Path) -> dict:
 
         return data
 
-async def parse_note(path: Path, filters: list[str]) -> None:
+async def parse_note(path: Path, filters: list[str]) -> list[str]:
     data = await get_file_metadata(path)
 
     tags = data.get("tags", [])
 
     if filters and any(filter not in tags for filter in filters):
-        return
+        return []
 
     return print_for_fzf(path, data)
     
 
-async def format_tags(notes_folder: Path, filters: list[str]) -> list[str]:
+async def format_tags(notes_folder: Path, filters: list[str]) -> None:
     tasks = [
         parse_note(Path(root) / file, filters)
         for root, _, files in notes_folder.walk()
         for file in files
     ]
 
-    return await asyncio.gather(*tasks)
+    data = await asyncio.gather(*tasks)
+
+    data = [d for d in data if d]
+    data.sort(key=lambda d: (get_attr_safe(d, 1), get_attr_safe(d, 2)))
+
+    max_lengths = [max(len(row[i]) for row in data) for i in range(len(data[0]))]
+
+    for d in data:
+        print("".join(
+            d[i].ljust(max_lengths[i])
+            for i in range(len(d))
+        ), end="")
+    
 
 
 if __name__ == "__main__":

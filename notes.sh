@@ -78,43 +78,6 @@ function contains() {
 }
 
  
-function todo_format() {
-  tags_to_filter="$@"
-
-  for path in "$NOTES_FOLDER"/*; do
-    [[ -f "$path" ]] || continue
-
-    filename="$(basename "$path")"
-    file_content=$(cat "$path" )
-    metadata=$(sed -n '/^---$/,/^---$/{/^---$/d; p; }' "$path")
-
-    tags=$(echo "$metadata" | awk '/^tags:/{f=1;next} f&&/^[[:space:]]*-[[:space:]]*/{sub(/^[[:space:]]*-[[:space:]]*/,"");print;next} f{exit}')
-      
-    print=1
-
-    for tag_to_filter in $tags_to_filter; do
-      if [[ $(contains "$tag_to_filter" ${tags}) == 0 ]]; then
-        print=0
-        break
-      fi
-    done
-
-    if [[ "$print" == 0 ]]; then
-      continue
-    fi
-
-    title="$(echo "$file_content" | grep "^# " | head -1 | cut -c3-)"
-    priority="$(echo "$file_content" | grep "^priority: " | cut -d' ' -f2)"
-
-    if [[ -n "$priority" ]]; then
-      printf "%s\t[%s] %s \n" "$filename" "$priority" "$title"
-    else
-      printf "%s\t %s \n" "$filename" "$title"
-    fi
-
-  done
-}
-
 function list_notes() {
   tag="$@"
 
