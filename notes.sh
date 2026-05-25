@@ -76,26 +76,33 @@ function clone_note() {
 
 
 function todo_format() {
-  tag_to_filter="$1"
+  tags_to_filter="$@"
 
   for path in "$NOTES_FOLDER"/*; do
     [[ -f "$path" ]] || continue
 
     filename="$(basename "$path")"
     file_content=$(cat "$path")
-    print=0
 
-    if [[ -z "$tag_to_filter" ]]; then
-      print=1
-    else
-      mapfile -t tags < <(echo "$file_content" | grep -A10 "^tags:" | grep "\- " | sed "s/\- //" | tr -d ' ')
-        
+    mapfile -t tags < <(echo "$file_content" | grep -A10 "^tags:" | grep "\- " | sed "s/\- //" | tr -d ' ')
+      
+    print=1
+
+    for tag_to_filter in $tags_to_filter; do
+      found=0
+
       for tag in "${tags[@]}"; do
         if [[ "$tag" == "$tag_to_filter" ]]; then
-          print=1
+          found=1
+          break
         fi
       done
-    fi
+
+      if [[ "$found" == 0 ]]; then
+        print=0
+        break
+      fi
+    done
 
     if [[ "$print" == 0 ]]; then
       continue
@@ -114,7 +121,7 @@ function todo_format() {
 }
 
 function list_notes() {
-  tag="$1"
+  tag="$@"
 
   selected=$(
     todo_format "$tag" \
