@@ -50,7 +50,8 @@ tags:"
 
 function open_note() {
   view_id="$1"
-  open_file "$NOTES_FOLDER/$view_id" +100
+  shift
+  open_file "$NOTES_FOLDER/$view_id" $@
 }
 
 function clone_note() {
@@ -87,10 +88,13 @@ function list_notes() {
           -m \
           --ansi \
           --with-nth=2.. \
+          --highlight-line \
+          --gap=1 \
+          --tac \
           --delimiter=$'\t' \
           --preview="glow -s dark $NOTES_FOLDER/{1}" \
           --preview-window='bottom,border-top,~3' \
-          --prompt="todos> " \
+          --prompt="notes> " \
           --bind "enter:execute-silent(notes open-note {1})+refresh-preview" \
           --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format ${tag})" \
           --bind "ctrl-n:execute-silent(notes new)+reload(notes todo-format ${tag})" \
@@ -111,7 +115,7 @@ function note_done() {
 function open_file() {
   file="$1"
   shift
-  alacritty -T "new-note" -e hx --config ~/.config/notes/helix.config.toml "$file" "${@:-}"
+  alacritty -T "new-note" -e hx --config ~/.config/notes/helix.config.toml "$file" ${@:-}
   
 }
 
@@ -164,7 +168,7 @@ case "$1" in
 
   "open-note")
     shift 1
-    open_note "$@"
+    open_note "$@" 
     ;;
 
   "clone-note")

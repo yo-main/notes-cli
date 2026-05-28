@@ -82,7 +82,7 @@ async def format_tags(notes_folder: Path, filters: list[str]) -> None:
         print("".join(
             d[i].ljust(max_lengths[i])
             for i in range(len(d))
-        ), end="")
+        ).strip())
     
 
 
