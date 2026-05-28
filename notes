@@ -147,7 +147,9 @@ function format() {
   for tag in $@; do
     filters="${filters} --filters ${tag}"
   done
-  ./format_notes.py --notes-folder "$NOTES_FOLDER" ${filters}
+
+  path="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  "${path}/format_notes.py" --notes-folder "$NOTES_FOLDER" ${filters}
 }
 
 
