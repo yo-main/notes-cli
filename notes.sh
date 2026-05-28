@@ -80,10 +80,11 @@ function contains() {
 
  
 function list_notes() {
-  tag="$@"
+  default_tags=$(cat "$CONFIG" | jq -r '.tags[]' )
+  tags="${@:-$default_tags}"
 
   selected=$(
-    format $tag \
+    format $tags \
       | fzf \
           -m \
           --ansi \
