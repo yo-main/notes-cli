@@ -1,5 +1,7 @@
 #! /usr/bin/env bash
 
+set -e 
+
 BASE_FOLDER="$HOME/.config/notes"
 CONFIG="$BASE_FOLDER/config.json"
 NOTES_FOLDER="$BASE_FOLDER/data"
@@ -82,9 +84,10 @@ function contains() {
 function list_notes() {
   default_tags=$(cat "$CONFIG" | jq -r '.tags[]' )
   tags="${@:-$default_tags}"
+  output=$(format $tags)
 
   selected=$(
-    format $tags \
+      echo "$output" \
       | fzf \
           -m \
           --ansi \

@@ -58,8 +58,18 @@ async def parse_note(path: Path, filters: list[str]) -> list[str]:
 
     tags = data.get("tags", [])
 
-    if filters and any(filter not in tags for filter in filters):
-        return []
+    if filters:
+        for filter in filters:
+            match filter[0]:
+                case "-":
+                    if filter[1:] in tags:
+                        return []
+                case "+":
+                    if filter[1:] not in tags:
+                        return []
+                case _:
+                    if filter not in tags:
+                        return []
 
     return print_for_fzf(path, data)
     
@@ -75,6 +85,9 @@ async def format_tags(notes_folder: Path, filters: list[str]) -> None:
 
     data = [d for d in data if d]
     data.sort(key=lambda d: (get_attr_safe(d, 1), get_attr_safe(d, 2)))
+
+    if not data:
+        return
 
     max_lengths = [max(len(row[i]) for row in data) for i in range(len(data[0]))]
 
