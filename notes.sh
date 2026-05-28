@@ -83,7 +83,7 @@ function list_notes() {
   tag="$@"
 
   selected=$(
-    ./format_notes.py --notes-folder "$NOTES_FOLDER" --filters "$tag" \
+    format $tag \
       | fzf \
           -m \
           --ansi \
@@ -115,7 +115,7 @@ function note_done() {
 function open_file() {
   file="$1"
   shift
-  alacritty -T "new-note" -e hx --config ~/.config/notes/helix.config.toml "$file" ${@:-}
+  alacritty -T "new-note" -e hx "$file" ${@:-}
   
 }
 
@@ -137,6 +137,15 @@ function sync_git() {
     jj --repository "$BASE_FOLDER" git push -b ${branch}
   fi
 }
+
+function format() {
+  filters=""
+  for tag in $@; do
+    filters="${filters} --filters ${tag}"
+  done
+  ./format_notes.py --notes-folder "$NOTES_FOLDER" ${filters}
+}
+
 
 sync_git &>/dev/null & disown
 
@@ -163,7 +172,7 @@ case "$1" in
 
   format)
     shift 1
-    ./format_notes.py --notes-folder "$NOTES_FOLDER" --filters "${@:-}"
+    format $@
     ;;
 
   open)
