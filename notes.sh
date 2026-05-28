@@ -95,10 +95,10 @@ function list_notes() {
           --preview="glow -s dark $NOTES_FOLDER/{1}" \
           --preview-window='bottom,border-top,~3' \
           --prompt="notes> " \
-          --bind "enter:execute-silent(notes open-note {1})+refresh-preview" \
-          --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes todo-format ${tag})" \
-          --bind "ctrl-n:execute-silent(notes new)+reload(notes todo-format ${tag})" \
-          --bind "ctrl-b:execute-silent(notes clone-note {1})+reload(notes todo-format ${tag})" \
+          --bind "enter:execute-silent(notes open {1})+refresh-preview" \
+          --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes format ${tag})" \
+          --bind "ctrl-n:execute-silent(notes new)+reload(notes format ${tag})" \
+          --bind "ctrl-b:execute-silent(notes clone {1})+reload(notes format ${tag})" \
           --footer "ctrl+space: mark as done - ctrl+n: new note - enter: open note - ctrl-enter: clone a note"
           # --preview="bat --color=always $NOTES_FOLDER/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $NOTES_FOLDER/)+reload($LIST_CMD)" \
@@ -161,22 +161,22 @@ case "$1" in
     note_done "$@"
     ;;
 
-  "todo-format")
+  format)
     shift 1
     ./format_notes.py --notes-folder "$NOTES_FOLDER" --filters "${@:-}"
     ;;
 
-  "open-note")
+  open)
     shift 1
     open_note "$@" 
     ;;
 
-  "clone-note")
+  clone)
     shift 1
     clone_note "$@"
     ;;
 
-  "sync")
+  sync)
     shift 1
     sync_git 
     ;;
