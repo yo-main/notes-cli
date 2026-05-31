@@ -8,11 +8,12 @@ NOTES_FOLDER="$BASE_FOLDER/data"
 
 
 function new_note() {
-  tags="$@"
+  default_tags=$(cat "$CONFIG" | jq -r '.tags[]' )
+  tags="${@:-$default_tags}"
 
   is_todo=$(contains "todo" $tags)
 
-  id="$(uuidgen | cut -c1-8)"
+  id="$(uuid | cut -c1-8)"
   filename="$NOTES_FOLDER/$id.md"
 
   template="---
@@ -53,16 +54,16 @@ tags:"
 function open_note() {
   view_id="$1"
   shift
-  open_file "$NOTES_FOLDER/$view_id" $@
+  open_file_in_popup "$NOTES_FOLDER/$view_id" $@
 }
 
 function clone_note() {
   view_id="$1"
 
-  id="$(uuidgen | cut -c1-8)"
+  id="$(uuid | cut -c1-8)"
   cp "$NOTES_FOLDER/$view_id" "$NOTES_FOLDER/$id.md"
 
-  open_file "$NOTES_FOLDER/$id.md" +100
+  open_file_in_popup "$NOTES_FOLDER/$id.md" +100
 }
 
 function contains() {
@@ -119,8 +120,13 @@ function note_done() {
 function open_file() {
   file="$1"
   shift
+  hx "$file" ${@:-}
+}
+
+function open_file_in_popup() {
+  file="$1"
+  shift
   alacritty -T "new-note" -e hx "$file" ${@:-}
-  
 }
 
 function sync_git() {
@@ -142,14 +148,37 @@ function sync_git() {
   fi
 }
 
+
+function current_path() {
+  echo "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  
+}
+
 function format() {
   filters=""
   for tag in $@; do
     filters="${filters} --filters ${tag}"
   done
 
-  path="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  path="$(current_path)"
   "${path}/format_notes.py" --notes-folder "$NOTES_FOLDER" ${filters}
+}
+
+function start_fuzzel() {
+  chosen=$(printf 'Todo\nAll\nNew' | fuzzel --dmenu)
+  path="$(current_path)"
+
+  case "$chosen" in
+    Todo)
+      alacritty --title "name-float" -e bash --login -c "${path}/notes list todo"
+      ;;
+    All)
+      alacritty --title "name-float" -e bash --login -c "${path}/notes list"
+      ;;
+    New)
+      alacritty --title "name-float" -e bash --login -c "${path}/notes new"
+      ;;
+  esac
 }
 
 
@@ -196,8 +225,13 @@ case "$1" in
     sync_git 
     ;;
 
+  fuzzel)
+    shift 1
+    start_fuzzel 
+    ;;
+
   *)
-    echo unknown command
+    echo unknown command "$1"
     ;;
 
 esac
