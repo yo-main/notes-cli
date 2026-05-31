@@ -117,6 +117,10 @@ function note_done() {
   sed -i "s/- todo$/- done/g" "$NOTES_FOLDER/$filename"
 }
 
+function note_journal() {
+  hx "${NOTES_FOLDER}/journal.md"
+}
+
 
 function open_file() {
   file="$1"
@@ -166,7 +170,7 @@ function format() {
 }
 
 function start_fuzzel() {
-  chosen=$(printf 'Todo\nAll\nNew' | fuzzel --dmenu)
+  chosen=$(printf 'Todo\nAll\nJournal\nNew' | fuzzel --dmenu)
   path="$(current_path)"
 
   case "$chosen" in
@@ -175,6 +179,9 @@ function start_fuzzel() {
       ;;
     All)
       alacritty --title "name-float" -e bash --login -c "${path}/notes list"
+      ;;
+    Journal)
+      alacritty --title "name-float" -e bash --login -c "${path}/notes journal"
       ;;
     New)
       alacritty --title "name-float" -e bash --login -c "${path}/notes new"
@@ -204,6 +211,11 @@ case "$1" in
   done)
     shift 1
     note_done "$@"
+    ;;
+
+  journal)
+    shift 1
+    note_journal "$@"
     ;;
 
   format)
