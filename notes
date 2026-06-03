@@ -86,6 +86,7 @@ function list_notes() {
   default_tags=$(cat "$CONFIG" | jq -r '.tags[]' )
   tags="${@:-$default_tags}"
   output=$(format $tags)
+  path="$(current_path)"
 
   selected=$(
       echo "$output" \
@@ -100,10 +101,10 @@ function list_notes() {
           --preview="glow -s dark $NOTES_FOLDER/{1}" \
           --preview-window='bottom,border-top,~3' \
           --prompt="notes> " \
-          --bind "enter:execute-silent(notes open {1})+refresh-preview" \
-          --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 notes done)+reload(notes format ${tag})" \
-          --bind "ctrl-n:execute-silent(notes new)+reload(notes format ${tag})" \
-          --bind "ctrl-b:execute-silent(notes clone {1})+reload(notes format ${tag})" \
+          --bind "enter:execute-silent(${path}/notes open {1})+refresh-preview" \
+          --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 ${path}/notes done)+reload(${path}/notes format ${tag})" \
+          --bind "ctrl-n:execute-silent(${path}/notes new)+reload(${path}/notes format ${tag})" \
+          --bind "ctrl-b:execute-silent(${path}/notes clone {1})+reload(${path}/notes format ${tag})" \
           --header "ctrl+space: mark as done - ctrl+n: new note - enter: open note - ctrl-enter: clone a note"
           # --preview="bat --color=always $NOTES_FOLDER/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $NOTES_FOLDER/)+reload($LIST_CMD)" \
