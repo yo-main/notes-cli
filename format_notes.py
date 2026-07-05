@@ -23,7 +23,7 @@ def main(notes_folder: Path = Path("~/.config/notes/data"), filters: list[str] =
     return asyncio.run(format_tags(notes_folder, filters))
 
 def print_for_fzf(path: Path, data: dict) -> list[str]:
-    tags = data.get("tags", [])
+    tags = data.get("tags") or []
     title: str = data["title"]
     created = data["created"]
 
@@ -35,6 +35,9 @@ def print_for_fzf(path: Path, data: dict) -> list[str]:
     
 
 async def get_file_metadata(path: Path) -> dict:
+    if str(path).endswith("journal.md"):
+        return {}
+
     async with aiofile.async_open(path) as stream:
         while await stream.readline() != "---\n":
             continue
@@ -56,7 +59,7 @@ async def get_file_metadata(path: Path) -> dict:
 async def parse_note(path: Path, filters: list[str]) -> list[str]:
     data = await get_file_metadata(path)
 
-    tags = data.get("tags", [])
+    tags = data.get("tags") or []
 
     if filters:
         for filter in filters:
