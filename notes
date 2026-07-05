@@ -41,13 +41,7 @@ tags:"
 
   echo "$template" > "$filename"
 
-  open_file "$filename" +100
-
-  title=$(tail -n 1 "$filename" | tr -d '[:space:]')
-  if [[ "$title" == "#" ]]; then
-    rm "$filename"
-    return
-  fi
+  open_file_in_popup "$filename" +100
 }
 
 
@@ -107,12 +101,12 @@ function list_notes() {
           --preview="glow -s dark $NOTES_FOLDER/{1}" \
           --preview-window='bottom,border-top,~3' \
           --prompt="notes> " \
-          --bind "enter:execute-silent(${path}/notes open {1})+refresh-preview" \
+          --bind "enter:execute-silent(${path}/notes open {1})+reload(${path}/notes format ${tag})" \
           --bind "ctrl-space:execute-silent(echo {+1} | xargs -n1 ${path}/notes done)+reload(${path}/notes format ${tag})" \
           --bind "ctrl-n:execute-silent(${path}/notes new)+reload(${path}/notes format ${tag})" \
           --bind "ctrl-b:execute-silent(${path}/notes clone {1})+reload(${path}/notes format ${tag})" \
           --bind "ctrl-d:execute-silent(${path}/notes delete {1})+reload(${path}/notes format ${tag})" \
-          --header "ctrl+space: mark as done - ctrl+n: new note - enter: open note - ctrl-enter: clone a note"
+          --header "ctrl+space: mark as done - ctrl+n: new note - enter: open note - ctrl+b: clone a note"
           # --preview="bat --color=always $NOTES_FOLDER/{1}" \
           # --bind "ctrl-d:execute-silent(echo {+1} | xargs -n1 rm $NOTES_FOLDER/)+reload($LIST_CMD)" \
   )
