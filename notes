@@ -85,6 +85,7 @@ function contains() {
 function list_notes() {
   default_tags=$(cat "$CONFIG" | jq -r '.tags[]' )
   tags="${@:-$default_tags}"
+  echo "coucoucou"
   output=$(format $tags)
   path="$(current_path)"
 
@@ -167,6 +168,7 @@ function format() {
   done
 
   path="$(current_path)"
+
   "${path}/format_notes.py" --notes-folder "$NOTES_FOLDER" ${filters}
 }
 

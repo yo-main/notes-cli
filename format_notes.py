@@ -1,5 +1,5 @@
 #!/usr/bin/env -S uv run --script
-# 
+#
 # /// script
 # requires-python = ">=3.14"
 # dependencies = ["typer", "aiofile", "pyyaml"]
@@ -12,54 +12,83 @@ import aiofile
 import yaml
 from pathlib import Path
 
+
 def get_attr_safe(values: list, index: int) -> str:
     try:
         return values[index]
     except IndexError:
         return ""
 
-def main(notes_folder: Path = Path("~/.config/notes/data"), filters: list[str] = []) -> list[str]:
+
+def main(
+    notes_folder: Path = Path("~/.config/notes/data"), filters: list[str] = []
+) -> list[str]:
     filters = [f for f in filters if f]
     return asyncio.run(format_tags(notes_folder, filters))
+
 
 def print_for_fzf(path: Path, data: dict) -> list[str]:
     tags = data.get("tags") or []
     title: str = data["title"]
     created = data["created"]
 
-
     if priority := data.get("priority", []):
-        return [path.name,"\t", f"[{created}]", "\t", f"[{priority}]", " ", f"#{get_attr_safe(tags, 0)}", "\t", title]
+        return [
+            path.name,
+            "\t",
+            f"[{created}]",
+            "\t",
+            f"[{priority}]",
+            " ",
+            f"#{get_attr_safe(tags, 0)}",
+            "\t",
+            title,
+        ]
     else:
-        return [path.name,"\t", f"[{created}]", "\t", f"#{get_attr_safe(tags, 0)}", " ", f"#{get_attr_safe(tags, 1)}", "\t", title]
-    
+        return [
+            path.name,
+            "\t",
+            f"[{created}]",
+            "\t",
+            f"#{get_attr_safe(tags, 0)}",
+            " ",
+            f"#{get_attr_safe(tags, 1)}",
+            "\t",
+            title,
+        ]
+
 
 async def get_file_metadata(path: Path) -> dict:
     if str(path).endswith("journal.md"):
         return {}
 
     async with aiofile.async_open(path) as stream:
-        while await stream.readline() != "---\n":
+        # empty string is EOF
+        while await stream.readline() not in ("---\n", ""):
             continue
 
         metadata = ""
 
-        while (l := await stream.readline()) != "---\n":
+        while (l := await stream.readline()) not in ("---\n", ""):
             metadata += str(l)
 
         data = yaml.load(metadata, yaml.CLoader)
 
-        while (l := await stream.readline()):
+        while l := await stream.readline():
             if str(l).startswith("#"):
                 data["title"] = str(l)[2:]
                 break
 
-        return data
+        return data or {}
+
 
 async def parse_note(path: Path, filters: list[str]) -> list[str]:
     data = await get_file_metadata(path)
 
     tags = data.get("tags") or []
+
+    if not data:
+        return []
 
     if filters:
         for filter in filters:
@@ -75,7 +104,7 @@ async def parse_note(path: Path, filters: list[str]) -> list[str]:
                         return []
 
     return print_for_fzf(path, data)
-    
+
 
 async def format_tags(notes_folder: Path, filters: list[str]) -> None:
     tasks = [
@@ -95,11 +124,7 @@ async def format_tags(notes_folder: Path, filters: list[str]) -> None:
     max_lengths = [max(len(row[i]) for row in data) for i in range(len(data[0]))]
 
     for d in data:
-        print("".join(
-            d[i].ljust(max_lengths[i])
-            for i in range(len(d))
-        ).strip())
-    
+        print("".join(d[i].ljust(max_lengths[i]) for i in range(len(d))).strip())
 
 
 if __name__ == "__main__":
