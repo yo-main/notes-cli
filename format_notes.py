@@ -6,11 +6,17 @@
 # ///
 
 
-import typer
 import asyncio
-import aiofile
-import yaml
+import logging
+from collections.abc import Generator
 from pathlib import Path
+
+import aiofile
+import typer
+import yaml
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 def get_attr_safe(values: list, index: int) -> str:
@@ -83,27 +89,31 @@ async def get_file_metadata(path: Path) -> dict:
 
 
 async def parse_note(path: Path, filters: list[str]) -> list[str]:
-    data = await get_file_metadata(path)
+    try:
+        data = await get_file_metadata(path)
 
-    tags = data.get("tags") or []
+        tags = data.get("tags") or []
 
-    if not data:
+        if not data:
+            return []
+
+        if filters:
+            for filter in filters:
+                match filter[0]:
+                    case "-":
+                        if filter[1:] in tags:
+                            return []
+                    case "+":
+                        if filter[1:] not in tags:
+                            return []
+                    case _:
+                        if filter not in tags:
+                            return []
+
+        return print_for_fzf(path, data)
+    except:
+        logger.exception("Failed to parse note %s", path)
         return []
-
-    if filters:
-        for filter in filters:
-            match filter[0]:
-                case "-":
-                    if filter[1:] in tags:
-                        return []
-                case "+":
-                    if filter[1:] not in tags:
-                        return []
-                case _:
-                    if filter not in tags:
-                        return []
-
-    return print_for_fzf(path, data)
 
 
 async def format_tags(notes_folder: Path, filters: list[str]) -> None:
