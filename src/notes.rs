@@ -259,4 +259,18 @@ mod tests {
         assert_eq!((e[1].title.as_str(), e[1].line), ("2025-12-10 - Wednesday", 3));
         assert_eq!(e[1].body, "### 2025-12-10 - Wednesday\n#### Work\nb\n");
     }
+
+    #[test]
+    fn title_ignores_heading_level() {
+        let n = parse(PathBuf::from("a.md"), "---\ncreated: x\n---\n\n## Sub title\n").unwrap();
+        assert_eq!(n.title, "Sub title");
+    }
+
+    #[test]
+    fn body_strips_frontmatter_like_parse_reads_it() {
+        assert_eq!(strip_frontmatter("---\r\ncreated: x\r\n---\r\nbody\r\n"), "body\r\n");
+        assert_eq!(strip_frontmatter("---\ncreated: x\n---"), "");
+        let n = parse(PathBuf::from("a.md"), "---\r\ntags:\r\n  - work\r\n---\r\n# T\r\n").unwrap();
+        assert_eq!((n.tags.as_slice(), n.title.as_str(), n.body.as_str()), (["work".to_string()].as_slice(), "T", "# T\r\n"));
+    }
 }
