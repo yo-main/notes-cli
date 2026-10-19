@@ -1,10 +1,10 @@
 mod notes;
 mod sync;
 
-use std::cmp::Reverse;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::LazyLock;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use std::{env, fs, thread};
@@ -34,6 +34,7 @@ struct App {
     config: Config,
     view: View,
     query: String,
+    cursor: usize,
     notes: Vec<Note>,
     journal: Vec<Entry>,
     filtered: Vec<usize>,
@@ -77,12 +78,12 @@ impl App {
         let pattern = Pattern::parse(&q.text, CaseMatching::Ignore, Normalization::Smart);
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         let mut buf = vec![];
-        let mut scored: Vec<(usize, u32)> = labels
+        self.filtered = labels
             .iter()
-            .filter_map(|(i, l)| pattern.score(Utf32Str::new(l, &mut buf), &mut matcher).map(|s| (*i, s)))
+            .filter(|(_, l)| pattern.score(Utf32Str::new(l, &mut buf), &mut matcher).is_some())
+            .map(|(i, _)| *i)
+            .rev()
             .collect();
-        scored.sort_by_key(|&(_, s)| Reverse(s));
-        self.filtered = scored.into_iter().rev().map(|(i, _)| i).collect();
         let max = self.filtered.len().saturating_sub(1);
         self.list.select(Some(self.list.selected().unwrap_or(max).min(max)));
     }
@@ -105,6 +106,24 @@ impl App {
         }
         if tags.is_empty() { self.config.tags.clone() } else { tags }
     }
+}
+
+fn prev_char(s: &str, i: usize) -> usize {
+    s[..i].char_indices().next_back().map_or(0, |(j, _)| j)
+}
+
+fn next_char(s: &str, i: usize) -> usize {
+    s[i..].chars().next().map_or(i, |c| i + c.len_utf8())
+}
+
+fn word_left(s: &str, i: usize) -> usize {
+    s[..i].trim_end_matches(' ').rfind(' ').map_or(0, |j| j + 1)
+}
+
+fn word_right(s: &str, i: usize) -> usize {
+    let rest = &s[i..];
+    let skip = rest.len() - rest.trim_start_matches(' ').len();
+    rest[skip..].find(' ').map_or(s.len(), |j| i + skip + j)
 }
 
 fn edit(terminal: &mut DefaultTerminal, path: &Path, line: Option<usize>) -> io::Result<()> {
@@ -197,36 +216,73 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
                 app.reload();
             }
         }
-        KeyCode::Backspace => {
-            app.query.pop();
+        KeyCode::Backspace if app.cursor > 0 => {
+            app.cursor = prev_char(&app.query, app.cursor);
+            app.query.remove(app.cursor);
             app.list.select(None);
             app.refilter();
         }
         KeyCode::Char(c) if !ctrl => {
-            app.query.push(c);
+            app.query.insert(app.cursor, c);
+            app.cursor += c.len_utf8();
             app.list.select(None);
             app.refilter();
         }
+        KeyCode::Left if ctrl => app.cursor = word_left(&app.query, app.cursor),
+        KeyCode::Right if ctrl => app.cursor = word_right(&app.query, app.cursor),
+        KeyCode::Left => app.cursor = prev_char(&app.query, app.cursor),
+        KeyCode::Right => app.cursor = next_char(&app.query, app.cursor),
+        KeyCode::Char('a') if ctrl => app.cursor = 0,
+        KeyCode::Char('e') if ctrl => app.cursor = app.query.len(),
         _ => {}
     }
     Ok(false)
 }
 
-#[derive(Clone)]
-struct Glow;
+const PURPLE: Color = Color::Rgb(0xbd, 0x93, 0xf9);
+const PINK: Color = Color::Rgb(0xff, 0x79, 0xc6);
+const CYAN: Color = Color::Rgb(0x8b, 0xe9, 0xfd);
+const GREEN: Color = Color::Rgb(0x50, 0xfa, 0x7b);
+const YELLOW: Color = Color::Rgb(0xf1, 0xfa, 0x8c);
+const COMMENT: Color = Color::Rgb(0x62, 0x72, 0xa4);
 
-impl tui_markdown::StyleSheet for Glow {
+#[derive(Clone)]
+struct Dracula;
+
+impl tui_markdown::StyleSheet for Dracula {
     fn heading(&self, level: u8) -> Style {
         match level {
-            1 => Style::new().fg(Color::Indexed(230)).bg(Color::Indexed(63)).bold(),
-            _ => Style::new().fg(Color::Indexed(39)).bold(),
+            1 => Style::new().fg(PURPLE).bold().underlined(),
+            _ => Style::new().fg(PURPLE).bold(),
         }
     }
 
-    fn heading_marker(&self, _level: u8) -> &str {
-        ""
+    fn heading_meta(&self) -> Style {
+        Style::new().fg(COMMENT)
+    }
+
+    fn code(&self) -> Style {
+        Style::new().fg(GREEN)
+    }
+
+    fn link(&self) -> Style {
+        Style::new().fg(CYAN).underlined()
+    }
+
+    fn blockquote(&self) -> Style {
+        Style::new().fg(YELLOW).italic()
+    }
+
+    fn list_marker(&self) -> Style {
+        Style::new().fg(PINK)
     }
 }
+
+static MARKDOWN: LazyLock<tui_markdown::Options<Dracula>> = LazyLock::new(|| {
+    let theme = tui_markdown::CodeTheme::from_textmate(include_str!("../assets/Dracula.tmTheme"))
+        .expect("embedded Dracula theme is valid");
+    tui_markdown::Options::new(Dracula).code_theme(theme)
+});
 
 fn cells(n: &Note) -> Vec<String> {
     let tag = |i: usize| n.tags.get(i).map(|t| format!("#{t}")).unwrap_or_default();
@@ -284,7 +340,8 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     frame.render_widget(Paragraph::new(Line::from(vec![counts.into(), rule.into()]).dim()), info);
 
     let line = Line::from(vec![Span::from("notes> ").blue().bold(), Span::from(app.query.as_str())]);
-    frame.set_cursor_position((prompt.x + line.width() as u16, prompt.y));
+    let before = Span::from(&app.query[..app.cursor]).width() + "notes> ".len();
+    frame.set_cursor_position((prompt.x + before as u16, prompt.y));
     frame.render_widget(Paragraph::new(line), prompt);
 
     let body = match (app.view, app.selected()) {
@@ -292,7 +349,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         (_, Some(i)) => app.notes[i].body.as_str(),
         _ => "",
     };
-    let text = tui_markdown::from_str_with_options(body, &tui_markdown::Options::new(Glow));
+    let text = tui_markdown::from_str_with_options(body, &MARKDOWN);
     let block = Block::new().borders(Borders::TOP).border_style(Style::new().dim()).padding(Padding::new(2, 2, 1, 0));
     frame.render_widget(Paragraph::new(text).block(block).wrap(Wrap { trim: false }), preview);
 }
@@ -311,11 +368,13 @@ fn main() -> io::Result<()> {
     let (sync_dir, branch) = (dir.clone(), config.git_branch.clone().unwrap_or("main".into()));
     thread::spawn(move || tx.send(sync::sync_blocking(&sync_dir, &branch)));
 
+    let query = if query.is_empty() { String::new() } else { query.join(" ") + " " };
     let mut app = App {
         dir,
         config,
         view: View::All,
-        query: if query.is_empty() { String::new() } else { query.join(" ") + " " },
+        cursor: query.len(),
+        query,
         notes: vec![],
         journal: vec![],
         filtered: vec![],
@@ -357,5 +416,24 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
         {
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cursor_moves() {
+        let s = "+work  é meet";
+        assert_eq!(word_left(s, s.len()), 10);
+        assert_eq!(word_left(s, 10), 7);
+        assert_eq!(word_left(s, 7), 0);
+        assert_eq!(word_right(s, 0), 5);
+        assert_eq!(word_right(s, 5), 9);
+        assert_eq!(word_right(s, 9), s.len());
+        assert_eq!(next_char(s, 7), 9);
+        assert_eq!(prev_char(s, 9), 7);
+        assert_eq!(prev_char(s, 0), 0);
     }
 }

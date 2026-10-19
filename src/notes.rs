@@ -118,7 +118,8 @@ pub fn parse_query(q: &str) -> Query {
 
 impl Query {
     pub fn keeps(&self, note: &Note) -> bool {
-        self.include.iter().all(|t| note.has_tag(t)) && !self.exclude.iter().any(|t| note.has_tag(t))
+        let like = |q: &String| note.tags.iter().any(|t| t.to_lowercase().contains(&q.to_lowercase()));
+        self.include.iter().all(like) && !self.exclude.iter().any(like)
     }
 }
 
@@ -230,7 +231,9 @@ mod tests {
         assert_eq!(q, Query { include: vec!["work".into()], exclude: vec!["done".into()], text: "meet up".into() });
         let n = parse(PathBuf::from("a.md"), NOTE).unwrap();
         assert!(parse_query("+WORK").keeps(&n));
-        assert!(!parse_query("-todo").keeps(&n));
+        assert!(parse_query("+wo").keeps(&n));
+        assert!(!parse_query("+meeting").keeps(&n));
+        assert!(!parse_query("-tod").keeps(&n));
     }
 
     #[test]
