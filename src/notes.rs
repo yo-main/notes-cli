@@ -11,7 +11,13 @@ pub struct Config {
     pub git_branch: Option<String>,
 }
 
+pub const TODO_TAG: &str = "todo";
+
 impl Config {
+    pub fn branch(&self) -> String {
+        self.git_branch.clone().unwrap_or("main".into())
+    }
+
     pub fn load(dir: &Path) -> Config {
         fs::read_to_string(dir.join("config.json"))
             .ok()
@@ -134,7 +140,7 @@ fn new_path(data_dir: &Path) -> PathBuf {
 
 pub fn new_note(data_dir: &Path, tags: &[String]) -> io::Result<PathBuf> {
     let mut content = format!("---\ncreated: {}\n", today());
-    if tags.iter().any(|t| t.eq_ignore_ascii_case("todo")) {
+    if tags.iter().any(|t| t.eq_ignore_ascii_case(TODO_TAG)) {
         content.push_str("priority: medium\n");
     }
     content.push_str("tags:\n");

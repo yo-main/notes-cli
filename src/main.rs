@@ -14,19 +14,41 @@ use nucleo_matcher::{Matcher, Utf32Str};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::{execute, terminal};
-use ratatui::layout::{Constraint, Layout};
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, HighlightSpacing, Padding, Paragraph, Row, Table, TableState, Wrap};
 
-use notes::{Config, JournalEntry, Note};
+use notes::{Config, JournalEntry, Note, TODO_TAG};
+
+const END_OF_FILE_LINE: usize = 100;
+const JOURNAL_BODY_LINE: usize = 2;
+const ROW_HEIGHT: u16 = 2;
+const PROMPT: &str = "notes> ";
 
 #[derive(Clone, Copy, PartialEq)]
 enum View {
     All,
     Todo,
     Journal,
+}
+
+impl View {
+    fn next(self) -> View {
+        match self {
+            View::All => View::Todo,
+            View::Todo => View::Journal,
+            View::Journal => View::All,
+        }
+    }
+
+    fn prev(self) -> View {
+        match self {
+            View::All => View::Journal,
+            View::Todo => View::All,
+            View::Journal => View::Todo,
+        }
+    }
 }
 
 struct App {
@@ -53,10 +75,6 @@ impl App {
         self.dir.join("journal.md")
     }
 
-    fn branch(&self) -> String {
-        self.config.git_branch.clone().unwrap_or("main".into())
-    }
-
     fn reload(&mut self) {
         self.notes = notes::load_all(&self.data_dir());
         self.journal = notes::journal_entries(&fs::read_to_string(self.journal_path()).unwrap_or_default());
@@ -71,7 +89,7 @@ impl App {
                 .notes
                 .iter()
                 .enumerate()
-                .filter(|(_, n)| q.matches_tag_filters(n) && (view != View::Todo || n.has_tag("todo")))
+                .filter(|(_, n)| q.matches_tag_filters(n) && (view != View::Todo || n.has_tag(TODO_TAG)))
                 .map(|(i, n)| (i, n.search_text()))
                 .collect(),
         };
@@ -88,6 +106,11 @@ impl App {
         self.table.select(Some(self.table.selected().unwrap_or(max).min(max)));
     }
 
+    fn reset_filter(&mut self) {
+        self.table.select(None);
+        self.refilter();
+    }
+
     fn selected_index(&self) -> Option<usize> {
         self.table.selected().and_then(|i| self.visible.get(i).copied())
     }
@@ -101,8 +124,8 @@ impl App {
 
     fn tags_for_new_note(&self) -> Vec<String> {
         let mut tags = notes::parse_query(&self.query).include;
-        if self.view == View::Todo && !tags.iter().any(|t| t.eq_ignore_ascii_case("todo")) {
-            tags.push("todo".into());
+        if self.view == View::Todo && !tags.iter().any(|t| t.eq_ignore_ascii_case(TODO_TAG)) {
+            tags.push(TODO_TAG.into());
         }
         if tags.is_empty() { self.config.tags.clone() } else { tags }
     }
@@ -157,22 +180,12 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
         KeyCode::Esc => return Ok(true),
         KeyCode::Char('c') if ctrl => return Ok(true),
         KeyCode::Tab => {
-            app.view = match app.view {
-                View::All => View::Todo,
-                View::Todo => View::Journal,
-                View::Journal => View::All,
-            };
-            app.table.select(None);
-            app.refilter();
+            app.view = app.view.next();
+            app.reset_filter();
         }
         KeyCode::BackTab => {
-            app.view = match app.view {
-                View::All => View::Journal,
-                View::Todo => View::All,
-                View::Journal => View::Todo,
-            };
-            app.table.select(None);
-            app.refilter();
+            app.view = app.view.prev();
+            app.reset_filter();
         }
         KeyCode::Up => app.table.select_previous(),
         KeyCode::Char('k') if ctrl => app.table.select_previous(),
@@ -184,7 +197,7 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
                     edit(terminal, &app.journal_path(), Some(app.journal[i].line))?;
                 }
             } else if let Some(n) = app.selected_note() {
-                edit(terminal, &n.path.clone(), None)?;
+                edit(terminal, &n.path, None)?;
             }
             app.reload();
         }
@@ -195,17 +208,17 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
                 if let Some(new) = notes::with_today_heading(&content, &notes::today()) {
                     fs::write(&path, new)?;
                 }
-                edit(terminal, &path, Some(2))?;
+                edit(terminal, &path, Some(JOURNAL_BODY_LINE))?;
             } else {
                 let path = notes::new_note(&app.data_dir(), &app.tags_for_new_note())?;
-                edit(terminal, &path, Some(100))?;
+                edit(terminal, &path, Some(TITLE_LINE))?;
             }
             app.reload();
         }
         KeyCode::Char('b') if ctrl => {
             if let Some(n) = app.selected_note() {
                 let path = notes::clone_note(&n.path)?;
-                edit(terminal, &path, Some(100))?;
+                edit(terminal, &path, Some(TITLE_LINE))?;
                 app.reload();
             }
         }
@@ -219,14 +232,12 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
         KeyCode::Backspace if app.cursor > 0 => {
             app.cursor = prev_char(&app.query, app.cursor);
             app.query.remove(app.cursor);
-            app.table.select(None);
-            app.refilter();
+            app.reset_filter();
         }
         KeyCode::Char(c) if !ctrl => {
             app.query.insert(app.cursor, c);
             app.cursor += c.len_utf8();
-            app.table.select(None);
-            app.refilter();
+            app.reset_filter();
         }
         KeyCode::Left if ctrl => app.cursor = word_left(&app.query, app.cursor),
         KeyCode::Right if ctrl => app.cursor = word_right(&app.query, app.cursor),
@@ -245,6 +256,7 @@ const CYAN: Color = Color::Rgb(0x8b, 0xe9, 0xfd);
 const GREEN: Color = Color::Rgb(0x50, 0xfa, 0x7b);
 const YELLOW: Color = Color::Rgb(0xf1, 0xfa, 0x8c);
 const COMMENT: Color = Color::Rgb(0x62, 0x72, 0xa4);
+const HIGHLIGHT_BG: Color = Color::Indexed(236);
 
 #[derive(Clone)]
 struct Dracula;
@@ -315,11 +327,11 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
             false => Constraint::Length(rows.iter().map(|r| r[c].chars().count()).max().unwrap_or(0) as u16),
         })
         .collect();
-    let height = (rows.len() as u16 * 2).min(list.height);
+    let height = (rows.len() as u16 * ROW_HEIGHT).min(list.height);
     let list = Rect { y: list.bottom() - height, height, ..list };
-    let table = Table::new(rows.into_iter().map(|r| Row::new(r).bottom_margin(1)), widths)
+    let table = Table::new(rows.into_iter().map(|r| Row::new(r).bottom_margin(ROW_HEIGHT - 1)), widths)
         .column_spacing(3)
-        .row_highlight_style(Style::new().bg(Color::Indexed(236)).bold())
+        .row_highlight_style(Style::new().bg(HIGHLIGHT_BG).bold())
         .highlight_symbol(Span::from("▌ ").red())
         .highlight_spacing(HighlightSpacing::Always);
     frame.render_stateful_widget(table, list, &mut app.table);
@@ -332,15 +344,15 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
 
     let (view, total) = match app.view {
         View::All => ("all", app.notes.len()),
-        View::Todo => ("todo", app.notes.iter().filter(|n| n.has_tag("todo")).count()),
+        View::Todo => ("todo", app.notes.iter().filter(|n| n.has_tag(TODO_TAG)).count()),
         View::Journal => ("journal", app.journal.len()),
     };
     let counts = format!("  {}/{total} · {view} · {} ", app.visible.len(), app.status);
     let rule = "─".repeat((info.width as usize).saturating_sub(counts.chars().count()));
     frame.render_widget(Paragraph::new(Line::from(vec![counts.into(), rule.into()]).dim()), info);
 
-    let line = Line::from(vec![Span::from("notes> ").blue().bold(), Span::from(app.query.as_str())]);
-    let before = Span::from(&app.query[..app.cursor]).width() + "notes> ".len();
+    let line = Line::from(vec![Span::from(PROMPT).blue().bold(), Span::from(app.query.as_str())]);
+    let before = Span::from(&app.query[..app.cursor]).width() + PROMPT.len();
     frame.set_cursor_position((prompt.x + before as u16, prompt.y));
     frame.render_widget(Paragraph::new(line), prompt);
 
@@ -365,7 +377,7 @@ fn main() -> io::Result<()> {
     let config = Config::load(&dir);
 
     let (tx, rx) = mpsc::channel();
-    let (sync_dir, branch) = (dir.clone(), config.git_branch.clone().unwrap_or("main".into()));
+    let (sync_dir, branch) = (dir.clone(), config.branch());
     thread::spawn(move || tx.send(sync::sync_blocking(&sync_dir, &branch)));
 
     let query = if query.is_empty() { String::new() } else { query.join(" ") + " " };
@@ -393,7 +405,7 @@ fn main() -> io::Result<()> {
     if let Some(rx) = app.sync_rx.take() {
         let _ = rx.recv();
     }
-    sync::spawn_detached(&app.dir, &app.branch());
+    sync::spawn_detached(&app.dir, &app.config.branch());
     result
 }
 
