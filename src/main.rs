@@ -1,5 +1,6 @@
 mod notes;
 mod sync;
+mod theme;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,11 +16,12 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::crossterm::{execute, terminal};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, HighlightSpacing, Padding, Paragraph, Row, Table, TableState, Wrap};
 
 use notes::{Config, JournalEntry, Note, TODO_TAG};
+use theme::{Dracula, HIGHLIGHT_BG};
 
 const END_OF_FILE_LINE: usize = 100;
 const JOURNAL_BODY_LINE: usize = 2;
@@ -96,12 +98,11 @@ impl App {
         let pattern = Pattern::parse(&q.text, CaseMatching::Ignore, Normalization::Smart);
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         let mut buf = vec![];
-        self.visible = labels
+        let newest_first = labels
             .iter()
             .filter(|(_, l)| pattern.score(Utf32Str::new(l, &mut buf), &mut matcher).is_some())
-            .map(|(i, _)| *i)
-            .rev()
-            .collect();
+            .map(|(i, _)| *i);
+        self.visible = newest_first.rev().collect();
         let max = self.visible.len().saturating_sub(1);
         self.table.select(Some(self.table.selected().unwrap_or(max).min(max)));
     }
@@ -164,6 +165,43 @@ fn edit(terminal: &mut DefaultTerminal, path: &Path, line: Option<usize>) -> io:
     result.map(|_| ())
 }
 
+fn open_selected(app: &mut App, terminal: &mut DefaultTerminal) -> io::Result<()> {
+    if app.view == View::Journal {
+        if let Some(i) = app.selected_index() {
+            edit(terminal, &app.journal_path(), Some(app.journal[i].line))?;
+        }
+    } else if let Some(n) = app.selected_note() {
+        edit(terminal, &n.path, None)?;
+    }
+    app.reload();
+    Ok(())
+}
+
+fn create_entry(app: &mut App, terminal: &mut DefaultTerminal) -> io::Result<()> {
+    if app.view == View::Journal {
+        let path = app.journal_path();
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        if let Some(new) = notes::with_today_heading(&content, &notes::today()) {
+            fs::write(&path, new)?;
+        }
+        edit(terminal, &path, Some(JOURNAL_BODY_LINE))?;
+    } else {
+        let path = notes::new_note(&app.data_dir(), &app.tags_for_new_note())?;
+        edit(terminal, &path, Some(END_OF_FILE_LINE))?;
+    }
+    app.reload();
+    Ok(())
+}
+
+fn clone_selected(app: &mut App, terminal: &mut DefaultTerminal) -> io::Result<()> {
+    if let Some(n) = app.selected_note() {
+        let path = notes::clone_note(&n.path)?;
+        edit(terminal, &path, Some(END_OF_FILE_LINE))?;
+        app.reload();
+    }
+    Ok(())
+}
+
 fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> io::Result<bool> {
     if app.confirm_delete {
         app.confirm_delete = false;
@@ -191,37 +229,9 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
         KeyCode::Char('k') if ctrl => app.table.select_previous(),
         KeyCode::Down => app.table.select_next(),
         KeyCode::Char('j') if ctrl => app.table.select_next(),
-        KeyCode::Enter => {
-            if app.view == View::Journal {
-                if let Some(i) = app.selected_index() {
-                    edit(terminal, &app.journal_path(), Some(app.journal[i].line))?;
-                }
-            } else if let Some(n) = app.selected_note() {
-                edit(terminal, &n.path, None)?;
-            }
-            app.reload();
-        }
-        KeyCode::Char('n') if ctrl => {
-            if app.view == View::Journal {
-                let path = app.journal_path();
-                let content = fs::read_to_string(&path).unwrap_or_default();
-                if let Some(new) = notes::with_today_heading(&content, &notes::today()) {
-                    fs::write(&path, new)?;
-                }
-                edit(terminal, &path, Some(JOURNAL_BODY_LINE))?;
-            } else {
-                let path = notes::new_note(&app.data_dir(), &app.tags_for_new_note())?;
-                edit(terminal, &path, Some(TITLE_LINE))?;
-            }
-            app.reload();
-        }
-        KeyCode::Char('b') if ctrl => {
-            if let Some(n) = app.selected_note() {
-                let path = notes::clone_note(&n.path)?;
-                edit(terminal, &path, Some(TITLE_LINE))?;
-                app.reload();
-            }
-        }
+        KeyCode::Enter => open_selected(app, terminal)?,
+        KeyCode::Char('n') if ctrl => create_entry(app, terminal)?,
+        KeyCode::Char('b') if ctrl => clone_selected(app, terminal)?,
         KeyCode::Char('d') if ctrl => app.confirm_delete = app.selected_note().is_some(),
         KeyCode::Char(' ') if ctrl => {
             if let Some(n) = app.selected_note() {
@@ -248,46 +258,6 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
         _ => {}
     }
     Ok(false)
-}
-
-const PURPLE: Color = Color::Rgb(0xbd, 0x93, 0xf9);
-const PINK: Color = Color::Rgb(0xff, 0x79, 0xc6);
-const CYAN: Color = Color::Rgb(0x8b, 0xe9, 0xfd);
-const GREEN: Color = Color::Rgb(0x50, 0xfa, 0x7b);
-const YELLOW: Color = Color::Rgb(0xf1, 0xfa, 0x8c);
-const COMMENT: Color = Color::Rgb(0x62, 0x72, 0xa4);
-const HIGHLIGHT_BG: Color = Color::Indexed(236);
-
-#[derive(Clone)]
-struct Dracula;
-
-impl tui_markdown::StyleSheet for Dracula {
-    fn heading(&self, level: u8) -> Style {
-        match level {
-            1 => Style::new().fg(PURPLE).bold().underlined(),
-            _ => Style::new().fg(PURPLE).bold(),
-        }
-    }
-
-    fn heading_meta(&self) -> Style {
-        Style::new().fg(COMMENT)
-    }
-
-    fn code(&self) -> Style {
-        Style::new().fg(GREEN)
-    }
-
-    fn link(&self) -> Style {
-        Style::new().fg(CYAN).underlined()
-    }
-
-    fn blockquote(&self) -> Style {
-        Style::new().fg(YELLOW).italic()
-    }
-
-    fn list_marker(&self) -> Style {
-        Style::new().fg(PINK)
-    }
 }
 
 static MARKDOWN: LazyLock<tui_markdown::Options<Dracula>> = LazyLock::new(|| {
@@ -366,21 +336,22 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     frame.render_widget(Paragraph::new(text).block(block).wrap(Wrap { trim: false }), preview);
 }
 
+fn initial_query(args: impl Iterator<Item = String>) -> String {
+    let filters: Vec<String> = args.map(|a| if a.starts_with(['+', '-']) { a } else { format!("+{a}") }).collect();
+    if filters.is_empty() { String::new() } else { filters.join(" ") + " " }
+}
+
 fn main() -> io::Result<()> {
     let dir = env::var("NOTES_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(env::var("HOME").unwrap_or_default()).join(".config/notes"));
-    let query: Vec<String> = env::args()
-        .skip(1)
-        .map(|a| if a.starts_with(['+', '-']) { a } else { format!("+{a}") })
-        .collect();
     let config = Config::load(&dir);
+    let query = initial_query(env::args().skip(1));
 
     let (tx, rx) = mpsc::channel();
     let (sync_dir, branch) = (dir.clone(), config.branch());
     thread::spawn(move || tx.send(sync::sync_blocking(&sync_dir, &branch)));
 
-    let query = if query.is_empty() { String::new() } else { query.join(" ") + " " };
     let mut app = App {
         dir,
         config,
