@@ -47,32 +47,45 @@ impl Note {
     }
 }
 
-pub fn parse_note(path: PathBuf, content: &str) -> Option<Note> {
-    if !content.starts_with("---") {
-        return None;
+fn is_fence(line: &str) -> bool {
+    line.trim_end_matches(['\n', '\r']) == "---"
+}
+
+fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
+    let opening = content.split_inclusive('\n').next().filter(|l| is_fence(l))?;
+    let mut end = opening.len();
+    for line in content[end..].split_inclusive('\n') {
+        end += line.len();
+        if is_fence(line) {
+            return Some(content.split_at(end));
+        }
     }
-    let mut note = Note { path, created: String::new(), priority: None, tags: vec![], title: String::new(), body: strip_frontmatter(content).to_string() };
-    let mut fences = 0;
+    None
+}
+
+pub fn parse_note(path: PathBuf, content: &str) -> Option<Note> {
+    let (head, _) = split_frontmatter(content)?;
+    let body = strip_frontmatter(content);
+    let title = body.lines().find(|l| l.starts_with('#')).map(|l| l.trim_start_matches('#').trim());
+    let mut note = Note {
+        path,
+        created: String::new(),
+        priority: None,
+        tags: vec![],
+        title: title.unwrap_or_default().to_string(),
+        body: body.to_string(),
+    };
     let mut in_tags = false;
-    for line in content.lines() {
-        if line == "---" {
-            fences += 1;
-        } else if fences == 1 {
+    for line in head.lines().filter(|l| !is_fence(l)) {
+        if let Some(tag) = line.trim().strip_prefix("- ").filter(|_| in_tags) {
+            note.tags.push(tag.trim().to_string());
+        } else {
+            in_tags = line.starts_with("tags:");
             if let Some(v) = line.strip_prefix("created:") {
                 note.created = v.trim().to_string();
             } else if let Some(v) = line.strip_prefix("priority:") {
                 note.priority = Some(v.trim().to_string());
-            } else if line.starts_with("tags:") {
-                in_tags = true;
-                continue;
-            } else if in_tags && let Some(t) = line.trim().strip_prefix("- ") {
-                note.tags.push(t.trim().to_string());
-                continue;
             }
-            in_tags = false;
-        } else if fences >= 2 && line.starts_with('#') {
-            note.title = line.get(2..).unwrap_or("").to_string();
-            break;
         }
     }
     Some(note)
@@ -95,10 +108,7 @@ pub fn load_all(data_dir: &Path) -> Vec<Note> {
 }
 
 pub fn strip_frontmatter(content: &str) -> &str {
-    content
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---\n"))
-        .map_or(content, |(_, body)| body)
+    split_frontmatter(content).map_or(content, |(_, body)| body)
 }
 
 #[derive(Debug, PartialEq)]
@@ -154,19 +164,22 @@ pub fn new_note(data_dir: &Path, tags: &[String]) -> io::Result<PathBuf> {
 }
 
 fn map_frontmatter(content: &str, f: impl Fn(&str) -> Option<String>) -> String {
+    let Some((head, body)) = split_frontmatter(content) else {
+        return content.to_string();
+    };
     let mut out = String::new();
-    let mut fences = 0;
-    for line in content.split_inclusive('\n') {
+    for line in head.split_inclusive('\n') {
         let bare = line.trim_end_matches(['\n', '\r']);
-        if bare == "---" {
-            fences += 1;
-        } else if fences == 1 && let Some(new) = f(bare) {
-            out.push_str(&new);
-            out.push_str(&line[bare.len()..]);
-            continue;
+        let mapped = if is_fence(line) { None } else { f(bare) };
+        match mapped {
+            Some(new) => {
+                out.push_str(&new);
+                out.push_str(&line[bare.len()..]);
+            }
+            None => out.push_str(line),
         }
-        out.push_str(line);
     }
+    out.push_str(body);
     out
 }
 
