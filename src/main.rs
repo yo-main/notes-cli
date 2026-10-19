@@ -20,7 +20,7 @@ use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, HighlightSpacing, Padding, Paragraph, Row, Table, TableState, Wrap};
 
-use notes::{Config, Entry, Note};
+use notes::{Config, JournalEntry, Note};
 
 #[derive(Clone, Copy, PartialEq)]
 enum View {
@@ -36,9 +36,9 @@ struct App {
     query: String,
     cursor: usize,
     notes: Vec<Note>,
-    journal: Vec<Entry>,
-    filtered: Vec<usize>,
-    list: TableState,
+    journal: Vec<JournalEntry>,
+    visible: Vec<usize>,
+    table: TableState,
     status: String,
     confirm_delete: bool,
     sync_rx: Option<Receiver<Result<(), String>>>,
@@ -71,35 +71,35 @@ impl App {
                 .notes
                 .iter()
                 .enumerate()
-                .filter(|(_, n)| q.keeps(n) && (view != View::Todo || n.has_tag("todo")))
-                .map(|(i, n)| (i, n.row()))
+                .filter(|(_, n)| q.matches_tag_filters(n) && (view != View::Todo || n.has_tag("todo")))
+                .map(|(i, n)| (i, n.search_text()))
                 .collect(),
         };
         let pattern = Pattern::parse(&q.text, CaseMatching::Ignore, Normalization::Smart);
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         let mut buf = vec![];
-        self.filtered = labels
+        self.visible = labels
             .iter()
             .filter(|(_, l)| pattern.score(Utf32Str::new(l, &mut buf), &mut matcher).is_some())
             .map(|(i, _)| *i)
             .rev()
             .collect();
-        let max = self.filtered.len().saturating_sub(1);
-        self.list.select(Some(self.list.selected().unwrap_or(max).min(max)));
+        let max = self.visible.len().saturating_sub(1);
+        self.table.select(Some(self.table.selected().unwrap_or(max).min(max)));
     }
 
-    fn selected(&self) -> Option<usize> {
-        self.list.selected().and_then(|i| self.filtered.get(i).copied())
+    fn selected_index(&self) -> Option<usize> {
+        self.table.selected().and_then(|i| self.visible.get(i).copied())
     }
 
     fn selected_note(&self) -> Option<&Note> {
         if self.view == View::Journal {
             return None;
         }
-        self.selected().map(|i| &self.notes[i])
+        self.selected_index().map(|i| &self.notes[i])
     }
 
-    fn new_tags(&self) -> Vec<String> {
+    fn tags_for_new_note(&self) -> Vec<String> {
         let mut tags = notes::parse_query(&self.query).include;
         if self.view == View::Todo && !tags.iter().any(|t| t.eq_ignore_ascii_case("todo")) {
             tags.push("todo".into());
@@ -162,7 +162,7 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
                 View::Todo => View::Journal,
                 View::Journal => View::All,
             };
-            app.list.select(None);
+            app.table.select(None);
             app.refilter();
         }
         KeyCode::BackTab => {
@@ -171,16 +171,16 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
                 View::Todo => View::All,
                 View::Journal => View::Todo,
             };
-            app.list.select(None);
+            app.table.select(None);
             app.refilter();
         }
-        KeyCode::Up => app.list.select_previous(),
-        KeyCode::Char('k') if ctrl => app.list.select_previous(),
-        KeyCode::Down => app.list.select_next(),
-        KeyCode::Char('j') if ctrl => app.list.select_next(),
+        KeyCode::Up => app.table.select_previous(),
+        KeyCode::Char('k') if ctrl => app.table.select_previous(),
+        KeyCode::Down => app.table.select_next(),
+        KeyCode::Char('j') if ctrl => app.table.select_next(),
         KeyCode::Enter => {
             if app.view == View::Journal {
-                if let Some(i) = app.selected() {
+                if let Some(i) = app.selected_index() {
                     edit(terminal, &app.journal_path(), Some(app.journal[i].line))?;
                 }
             } else if let Some(n) = app.selected_note() {
@@ -197,7 +197,7 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
                 }
                 edit(terminal, &path, Some(2))?;
             } else {
-                let path = notes::new_note(&app.data_dir(), &app.new_tags())?;
+                let path = notes::new_note(&app.data_dir(), &app.tags_for_new_note())?;
                 edit(terminal, &path, Some(100))?;
             }
             app.reload();
@@ -219,13 +219,13 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
         KeyCode::Backspace if app.cursor > 0 => {
             app.cursor = prev_char(&app.query, app.cursor);
             app.query.remove(app.cursor);
-            app.list.select(None);
+            app.table.select(None);
             app.refilter();
         }
         KeyCode::Char(c) if !ctrl => {
             app.query.insert(app.cursor, c);
             app.cursor += c.len_utf8();
-            app.list.select(None);
+            app.table.select(None);
             app.refilter();
         }
         KeyCode::Left if ctrl => app.cursor = word_left(&app.query, app.cursor),
@@ -284,7 +284,7 @@ static MARKDOWN: LazyLock<tui_markdown::Options<Dracula>> = LazyLock::new(|| {
     tui_markdown::Options::new(Dracula).code_theme(theme)
 });
 
-fn cells(n: &Note) -> Vec<String> {
+fn table_cells(n: &Note) -> Vec<String> {
     let tag = |i: usize| n.tags.get(i).map(|t| format!("#{t}")).unwrap_or_default();
     let first = match &n.priority {
         Some(p) => format!("[{p}] {}", tag(0)),
@@ -304,9 +304,9 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     .areas(frame.area());
 
     let rows: Vec<Vec<String>> = app
-        .filtered
+        .visible
         .iter()
-        .map(|&i| if app.view == View::Journal { vec![app.journal[i].title.clone()] } else { cells(&app.notes[i]) })
+        .map(|&i| if app.view == View::Journal { vec![app.journal[i].title.clone()] } else { table_cells(&app.notes[i]) })
         .collect();
     let ncols = rows.first().map_or(1, Vec::len);
     let widths: Vec<Constraint> = (0..ncols)
@@ -322,7 +322,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         .row_highlight_style(Style::new().bg(Color::Indexed(236)).bold())
         .highlight_symbol(Span::from("▌ ").red())
         .highlight_spacing(HighlightSpacing::Always);
-    frame.render_stateful_widget(table, list, &mut app.list);
+    frame.render_stateful_widget(table, list, &mut app.table);
 
     let help = match app.confirm_delete {
         true => Line::from("Delete this note? y/n").red().bold(),
@@ -335,7 +335,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         View::Todo => ("todo", app.notes.iter().filter(|n| n.has_tag("todo")).count()),
         View::Journal => ("journal", app.journal.len()),
     };
-    let counts = format!("  {}/{total} · {view} · {} ", app.filtered.len(), app.status);
+    let counts = format!("  {}/{total} · {view} · {} ", app.visible.len(), app.status);
     let rule = "─".repeat((info.width as usize).saturating_sub(counts.chars().count()));
     frame.render_widget(Paragraph::new(Line::from(vec![counts.into(), rule.into()]).dim()), info);
 
@@ -344,7 +344,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     frame.set_cursor_position((prompt.x + before as u16, prompt.y));
     frame.render_widget(Paragraph::new(line), prompt);
 
-    let body = match (app.view, app.selected()) {
+    let body = match (app.view, app.selected_index()) {
         (View::Journal, Some(i)) => app.journal[i].body.as_str(),
         (_, Some(i)) => app.notes[i].body.as_str(),
         _ => "",
@@ -377,8 +377,8 @@ fn main() -> io::Result<()> {
         query,
         notes: vec![],
         journal: vec![],
-        filtered: vec![],
-        list: TableState::default(),
+        visible: vec![],
+        table: TableState::default(),
         status: "syncing…".into(),
         confirm_delete: false,
         sync_rx: Some(rx),

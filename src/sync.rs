@@ -2,7 +2,7 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-const SCRIPT: &str = r#"
+const SYNC_SCRIPT: &str = r#"
 set -e
 dir=$1; branch=$2
 j() { jj --repository "$dir" "$@"; }
@@ -15,14 +15,14 @@ j bookmark move "$branch" --to @-
 j git push -b "$branch"
 "#;
 
-fn command(dir: &Path, branch: &str) -> Command {
+fn sync_command(dir: &Path, branch: &str) -> Command {
     let mut cmd = Command::new("sh");
-    cmd.args(["-c", SCRIPT, "sh"]).arg(dir).arg(branch).stdin(Stdio::null());
+    cmd.args(["-c", SYNC_SCRIPT, "sh"]).arg(dir).arg(branch).stdin(Stdio::null());
     cmd
 }
 
 pub fn sync_blocking(dir: &Path, branch: &str) -> Result<(), String> {
-    let out = command(dir, branch).output().map_err(|e| e.to_string())?;
+    let out = sync_command(dir, branch).output().map_err(|e| e.to_string())?;
     if out.status.success() {
         return Ok(());
     }
@@ -31,5 +31,5 @@ pub fn sync_blocking(dir: &Path, branch: &str) -> Result<(), String> {
 }
 
 pub fn spawn_detached(dir: &Path, branch: &str) {
-    let _ = command(dir, branch).stdout(Stdio::null()).stderr(Stdio::null()).process_group(0).spawn();
+    let _ = sync_command(dir, branch).stdout(Stdio::null()).stderr(Stdio::null()).process_group(0).spawn();
 }

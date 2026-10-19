@@ -30,7 +30,7 @@ pub struct Note {
 }
 
 impl Note {
-    pub fn row(&self) -> String {
+    pub fn search_text(&self) -> String {
         let prio = self.priority.as_ref().map(|p| format!(" [{p}]")).unwrap_or_default();
         let tags: Vec<String> = self.tags.iter().map(|t| format!("#{t}")).collect();
         format!("[{}]{prio} {} {}", self.created, tags.join(" "), self.title)
@@ -41,7 +41,7 @@ impl Note {
     }
 }
 
-pub fn parse(path: PathBuf, content: &str) -> Option<Note> {
+pub fn parse_note(path: PathBuf, content: &str) -> Option<Note> {
     if !content.starts_with("---") {
         return None;
     }
@@ -81,7 +81,7 @@ pub fn load_all(data_dir: &Path) -> Vec<Note> {
         .filter(|p| p.extension().is_some_and(|e| e == "md"))
         .filter_map(|p| {
             let content = fs::read_to_string(&p).ok()?;
-            parse(p, &content)
+            parse_note(p, &content)
         })
         .collect();
     notes.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| a.path.cmp(&b.path)));
@@ -117,7 +117,7 @@ pub fn parse_query(q: &str) -> Query {
 }
 
 impl Query {
-    pub fn keeps(&self, note: &Note) -> bool {
+    pub fn matches_tag_filters(&self, note: &Note) -> bool {
         let like = |q: &String| note.tags.iter().any(|t| t.to_lowercase().contains(&q.to_lowercase()));
         self.include.iter().all(like) && !self.exclude.iter().any(like)
     }
@@ -180,17 +180,17 @@ pub fn mark_done(content: &str) -> String {
     })
 }
 
-pub struct Entry {
+pub struct JournalEntry {
     pub title: String,
     pub line: usize,
     pub body: String,
 }
 
-pub fn journal_entries(content: &str) -> Vec<Entry> {
-    let mut entries: Vec<Entry> = vec![];
+pub fn journal_entries(content: &str) -> Vec<JournalEntry> {
+    let mut entries: Vec<JournalEntry> = vec![];
     for (i, line) in content.lines().enumerate() {
         if let Some(title) = line.strip_prefix("### ") {
-            entries.push(Entry { title: title.to_string(), line: i + 1, body: String::new() });
+            entries.push(JournalEntry { title: title.to_string(), line: i + 1, body: String::new() });
         }
         if let Some(e) = entries.last_mut() {
             e.body.push_str(line);
@@ -216,24 +216,24 @@ mod tests {
 
     #[test]
     fn parses_frontmatter_and_title() {
-        let n = parse(PathBuf::from("a.md"), NOTE).unwrap();
+        let n = parse_note(PathBuf::from("a.md"), NOTE).unwrap();
         assert_eq!(n.created, "2026-07-30");
         assert_eq!(n.priority.as_deref(), Some("medium"));
         assert_eq!(n.tags, ["work", "todo"]);
         assert_eq!(n.title, "TLID");
-        assert_eq!(n.row(), "[2026-07-30] [medium] #work #todo TLID");
-        assert!(parse(PathBuf::from("b.md"), "# no frontmatter").is_none());
+        assert_eq!(n.search_text(), "[2026-07-30] [medium] #work #todo TLID");
+        assert!(parse_note(PathBuf::from("b.md"), "# no frontmatter").is_none());
     }
 
     #[test]
     fn query_splits_tags_and_text() {
         let q = parse_query("+work -done meet up");
         assert_eq!(q, Query { include: vec!["work".into()], exclude: vec!["done".into()], text: "meet up".into() });
-        let n = parse(PathBuf::from("a.md"), NOTE).unwrap();
-        assert!(parse_query("+WORK").keeps(&n));
-        assert!(parse_query("+wo").keeps(&n));
-        assert!(!parse_query("+meeting").keeps(&n));
-        assert!(!parse_query("-tod").keeps(&n));
+        let n = parse_note(PathBuf::from("a.md"), NOTE).unwrap();
+        assert!(parse_query("+WORK").matches_tag_filters(&n));
+        assert!(parse_query("+wo").matches_tag_filters(&n));
+        assert!(!parse_query("+meeting").matches_tag_filters(&n));
+        assert!(!parse_query("-tod").matches_tag_filters(&n));
     }
 
     #[test]
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn title_ignores_heading_level() {
-        let n = parse(PathBuf::from("a.md"), "---\ncreated: x\n---\n\n## Sub title\n").unwrap();
+        let n = parse_note(PathBuf::from("a.md"), "---\ncreated: x\n---\n\n## Sub title\n").unwrap();
         assert_eq!(n.title, "Sub title");
     }
 
@@ -270,7 +270,7 @@ mod tests {
     fn body_strips_frontmatter_like_parse_reads_it() {
         assert_eq!(strip_frontmatter("---\r\ncreated: x\r\n---\r\nbody\r\n"), "body\r\n");
         assert_eq!(strip_frontmatter("---\ncreated: x\n---"), "");
-        let n = parse(PathBuf::from("a.md"), "---\r\ntags:\r\n  - work\r\n---\r\n# T\r\n").unwrap();
+        let n = parse_note(PathBuf::from("a.md"), "---\r\ntags:\r\n  - work\r\n---\r\n# T\r\n").unwrap();
         assert_eq!((n.tags.as_slice(), n.title.as_str(), n.body.as_str()), (["work".to_string()].as_slice(), "T", "# T\r\n"));
     }
 }
