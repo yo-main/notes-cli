@@ -54,6 +54,12 @@ impl View {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum Action {
+    Quit,
+    Edit(PathBuf, Option<usize>),
+}
+
 struct App {
     dir: PathBuf,
     config: Config,
@@ -70,6 +76,25 @@ struct App {
 }
 
 impl App {
+    fn new(dir: PathBuf, config: Config, query: String) -> App {
+        let mut app = App {
+            dir,
+            config,
+            view: View::All,
+            cursor: query.len(),
+            query,
+            notes: vec![],
+            journal: vec![],
+            visible: vec![],
+            table: TableState::default(),
+            status: String::new(),
+            confirm_delete: false,
+            sync_rx: None,
+        };
+        app.reload();
+        app
+    }
+
     fn data_dir(&self) -> PathBuf {
         self.dir.join("data")
     }
@@ -166,44 +191,35 @@ fn edit(terminal: &mut DefaultTerminal, path: &Path, line: Option<usize>) -> io:
     result.map(|_| ())
 }
 
-fn open_selected(app: &mut App, terminal: &mut DefaultTerminal) -> io::Result<()> {
+fn open_selected(app: &App) -> Option<Action> {
     if app.view == View::Journal {
-        if let Some(i) = app.selected_index() {
-            edit(terminal, &app.journal_path(), Some(app.journal[i].line))?;
-        }
-    } else if let Some(n) = app.selected_note() {
-        edit(terminal, &n.path, None)?;
+        let i = app.selected_index()?;
+        Some(Action::Edit(app.journal_path(), Some(app.journal[i].line)))
+    } else {
+        app.selected_note().map(|n| Action::Edit(n.path.clone(), None))
     }
-    app.reload();
-    Ok(())
 }
 
-fn create_entry(app: &mut App, terminal: &mut DefaultTerminal) -> io::Result<()> {
+fn create_entry(app: &App) -> io::Result<Action> {
     if app.view == View::Journal {
         let path = app.journal_path();
         let content = fs::read_to_string(&path).unwrap_or_default();
         if let Some(new) = notes::with_today_heading(&content, &notes::today()) {
             fs::write(&path, new)?;
         }
-        edit(terminal, &path, Some(JOURNAL_BODY_LINE))?;
+        Ok(Action::Edit(path, Some(JOURNAL_BODY_LINE)))
     } else {
         let path = notes::new_note(&app.data_dir(), &app.tags_for_new_note())?;
-        edit(terminal, &path, Some(END_OF_FILE_LINE))?;
+        Ok(Action::Edit(path, Some(END_OF_FILE_LINE)))
     }
-    app.reload();
-    Ok(())
 }
 
-fn clone_selected(app: &mut App, terminal: &mut DefaultTerminal) -> io::Result<()> {
-    if let Some(n) = app.selected_note() {
-        let path = notes::clone_note(&n.path)?;
-        edit(terminal, &path, Some(END_OF_FILE_LINE))?;
-        app.reload();
-    }
-    Ok(())
+fn clone_selected(app: &App) -> io::Result<Option<Action>> {
+    let Some(n) = app.selected_note() else { return Ok(None) };
+    Ok(Some(Action::Edit(notes::clone_note(&n.path)?, Some(END_OF_FILE_LINE))))
 }
 
-fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> io::Result<bool> {
+fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<Option<Action>> {
     if app.confirm_delete {
         app.confirm_delete = false;
         if key.code == KeyCode::Char('y')
@@ -212,12 +228,12 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
             fs::remove_file(&n.path)?;
             app.reload();
         }
-        return Ok(false);
+        return Ok(None);
     }
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
-        KeyCode::Esc => return Ok(true),
-        KeyCode::Char('c') if ctrl => return Ok(true),
+        KeyCode::Esc => return Ok(Some(Action::Quit)),
+        KeyCode::Char('c') if ctrl => return Ok(Some(Action::Quit)),
         KeyCode::Tab => {
             app.view = app.view.next();
             app.reset_filter();
@@ -230,9 +246,9 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
         KeyCode::Char('k') if ctrl => app.table.select_previous(),
         KeyCode::Down => app.table.select_next(),
         KeyCode::Char('j') if ctrl => app.table.select_next(),
-        KeyCode::Enter => open_selected(app, terminal)?,
-        KeyCode::Char('n') if ctrl => create_entry(app, terminal)?,
-        KeyCode::Char('b') if ctrl => clone_selected(app, terminal)?,
+        KeyCode::Enter => return Ok(open_selected(app)),
+        KeyCode::Char('n') if ctrl => return create_entry(app).map(Some),
+        KeyCode::Char('b') if ctrl => return clone_selected(app),
         KeyCode::Char('d') if ctrl => app.confirm_delete = app.selected_note().is_some(),
         KeyCode::Char(' ') if ctrl => {
             if let Some(n) = app.selected_note() {
@@ -258,7 +274,7 @@ fn handle_key(app: &mut App, terminal: &mut DefaultTerminal, key: KeyEvent) -> i
         KeyCode::Char('e') if ctrl => app.cursor = app.query.len(),
         _ => {}
     }
-    Ok(false)
+    Ok(None)
 }
 
 static MARKDOWN: LazyLock<tui_markdown::Options<Dracula>> = LazyLock::new(|| {
@@ -362,21 +378,9 @@ fn main() -> io::Result<()> {
     let (sync_dir, branch) = (dir.clone(), config.branch());
     thread::spawn(move || tx.send(sync::sync_blocking(&sync_dir, &branch)));
 
-    let mut app = App {
-        dir,
-        config,
-        view: View::All,
-        cursor: query.len(),
-        query,
-        notes: vec![],
-        journal: vec![],
-        visible: vec![],
-        table: TableState::default(),
-        status: "syncing…".into(),
-        confirm_delete: false,
-        sync_rx: Some(rx),
-    };
-    app.reload();
+    let mut app = App::new(dir, config, query);
+    app.status = "syncing…".into();
+    app.sync_rx = Some(rx);
 
     let mut terminal = ratatui::init();
     let result = run(&mut terminal, &mut app);
@@ -405,9 +409,15 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> io::Result<()> {
         if event::poll(Duration::from_millis(250))?
             && let Event::Key(key) = event::read()?
             && key.kind == KeyEventKind::Press
-            && handle_key(app, terminal, key)?
         {
-            return Ok(());
+            match handle_key(app, key)? {
+                Some(Action::Quit) => return Ok(()),
+                Some(Action::Edit(path, line)) => {
+                    edit(terminal, &path, line)?;
+                    app.reload();
+                }
+                None => {}
+            }
         }
     }
 }
@@ -428,5 +438,61 @@ mod tests {
         assert_eq!(next_char(s, 7), 9);
         assert_eq!(prev_char(s, 9), 7);
         assert_eq!(prev_char(s, 0), 0);
+    }
+
+    const TODO_NOTE: &str = "---\ncreated: 2026-01-01\ntags:\n  - TODO\n---\n\n# A\n";
+
+    fn app_with(notes: &[&str]) -> App {
+        let dir = env::temp_dir().join(format!("ratanote-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(dir.join("data")).unwrap();
+        for (i, n) in notes.iter().enumerate() {
+            fs::write(dir.join("data").join(format!("{i}.md")), n).unwrap();
+        }
+        App::new(dir, Config::default(), String::new())
+    }
+
+    fn press(app: &mut App, code: KeyCode, mods: KeyModifiers) -> Option<Action> {
+        handle_key(app, KeyEvent::new(code, mods)).unwrap()
+    }
+
+    #[test]
+    fn ctrl_space_marks_done() {
+        let mut app = app_with(&[TODO_NOTE]);
+        press(&mut app, KeyCode::Char(' '), KeyModifiers::CONTROL);
+        assert!(fs::read_to_string(app.data_dir().join("0.md")).unwrap().contains("  - done\n"));
+    }
+
+    #[test]
+    fn delete_needs_confirmation() {
+        let mut app = app_with(&[TODO_NOTE]);
+        let path = app.data_dir().join("0.md");
+        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('n'), KeyModifiers::NONE);
+        assert!(path.exists());
+        press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        press(&mut app, KeyCode::Char('y'), KeyModifiers::NONE);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn new_note_in_todo_view_is_tagged_todo() {
+        let mut app = app_with(&[]);
+        press(&mut app, KeyCode::Tab, KeyModifiers::NONE);
+        let Some(Action::Edit(path, line)) = press(&mut app, KeyCode::Char('n'), KeyModifiers::CONTROL) else {
+            panic!("expected an edit");
+        };
+        assert_eq!(line, Some(END_OF_FILE_LINE));
+        assert!(fs::read_to_string(path).unwrap().contains("  - todo\n"));
+    }
+
+    #[test]
+    fn typing_edits_query() {
+        let mut app = app_with(&[]);
+        press(&mut app, KeyCode::Char('a'), KeyModifiers::NONE);
+        press(&mut app, KeyCode::Char('é'), KeyModifiers::NONE);
+        assert_eq!((app.query.as_str(), app.cursor), ("aé", 3));
+        press(&mut app, KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!((app.query.as_str(), app.cursor), ("a", 1));
+        assert_eq!(press(&mut app, KeyCode::Esc, KeyModifiers::NONE), Some(Action::Quit));
     }
 }
