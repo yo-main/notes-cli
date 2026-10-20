@@ -338,6 +338,8 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
         .collect();
     let height = (rows.len() as u16 * ROW_HEIGHT).min(list.height);
     let list = Rect { y: list.bottom() - height, height, ..list };
+    let fit = (list.height as usize + 1) / ROW_HEIGHT as usize;
+    *app.table.offset_mut() = app.table.offset().min(app.visible.len().saturating_sub(fit));
     let table = Table::new(rows.into_iter().map(|r| Row::new(r).bottom_margin(ROW_HEIGHT - 1)), widths)
         .column_spacing(3)
         .row_highlight_style(Style::new().bg(HIGHLIGHT_BG).bold())
@@ -519,6 +521,17 @@ mod tests {
         let path = app.journal_path();
         assert_eq!(press(&mut app, KeyCode::Enter, KeyModifiers::NONE), Some(Action::Edit(path, Some(1))));
         assert!(press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL).is_none() && !app.confirm_delete);
+    }
+
+    #[test]
+    fn growing_the_window_shows_more_notes() {
+        let notes: Vec<String> = (0..10).map(|i| format!("---\ncreated: 2026-01-{:02}\n---\n\n# N{i}\n", i + 1)).collect();
+        let mut app = app_with(&notes.iter().map(String::as_str).collect::<Vec<_>>());
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 20)).unwrap();
+        term.draw(|f| draw(f, &mut app)).unwrap();
+        term.backend_mut().resize(60, 60);
+        let screen = format!("{:?}", term.draw(|f| draw(f, &mut app)).unwrap().buffer);
+        assert!(screen.contains("N0"));
     }
 
     #[test]
