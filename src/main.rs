@@ -308,18 +308,27 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
 
     let help = match app.confirm_delete {
         true => Line::from("Delete this note? y/n").red().bold(),
-        false => Line::from("enter: open · ctrl+n: new · ctrl+b: clone · ctrl+d: delete · ctrl+space: done · tab/shift+tab: view").dim(),
+        false => {
+            let done = if app.view == View::Todo { "ctrl+space: done · " } else { "" };
+            Line::from(format!("enter: open · ctrl+n: new · ctrl+b: clone · ctrl+d: delete · {done}tab/shift+tab: view")).dim()
+        }
     };
     frame.render_widget(Paragraph::new(help), header);
 
-    let (view, total) = match app.view {
-        View::All => ("all", app.notes.len()),
-        View::Todo => ("todo", app.notes.iter().filter(|n| n.has_tag(TODO_TAG)).count()),
-        View::Journal => ("journal", app.journal.len()),
+    let total = match app.view {
+        View::All => app.notes.len(),
+        View::Todo => app.notes.iter().filter(|n| n.has_tag(TODO_TAG)).count(),
+        View::Journal => app.journal.len(),
     };
-    let counts = format!("  {}/{total} · {view} · {} ", app.visible.len(), app.status);
-    let rule = "─".repeat((info.width as usize).saturating_sub(counts.chars().count()));
-    frame.render_widget(Paragraph::new(Line::from(vec![counts.into(), rule.into()]).dim()), info);
+    let mut line = Line::from(Span::from(format!("  {}/{total} · ", app.visible.len())).dim());
+    for (view, label) in [(View::All, "all"), (View::Todo, "todo"), (View::Journal, "journal")] {
+        let span = Span::from(format!(" {label} "));
+        line.push_span(if view == app.view { span.reversed().bold() } else { span.dim() });
+    }
+    line.push_span(Span::from(format!(" · {} ", app.status)).dim());
+    let rule = "─".repeat((info.width as usize).saturating_sub(line.width()));
+    line.push_span(Span::from(rule).dim());
+    frame.render_widget(Paragraph::new(line), info);
 
     let line = Line::from(vec![Span::from(PROMPT).blue().bold(), Span::from(app.query.as_str())]);
     let before = Span::from(&app.query[..app.cursor]).width() + PROMPT.len();
