@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::frontmatter;
+
 #[derive(Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
@@ -47,48 +49,17 @@ impl Note {
     }
 }
 
-fn is_fence(line: &str) -> bool {
-    line.trim_end_matches(['\n', '\r']) == "---"
-}
-
-fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
-    let opening = content.split_inclusive('\n').next().filter(|l| is_fence(l))?;
-    let mut end = opening.len();
-    for line in content[end..].split_inclusive('\n') {
-        end += line.len();
-        if is_fence(line) {
-            return Some(content.split_at(end));
-        }
-    }
-    None
-}
-
 pub fn parse_note(path: PathBuf, content: &str) -> Option<Note> {
-    let (head, _) = split_frontmatter(content)?;
-    let body = strip_frontmatter(content);
+    let (fields, body) = frontmatter::parse(content)?;
     let title = body.lines().find(|l| l.starts_with('#')).map(|l| l.trim_start_matches('#').trim());
-    let mut note = Note {
+    Some(Note {
         path,
-        created: String::new(),
-        priority: None,
-        tags: vec![],
+        created: fields.created,
+        priority: fields.priority,
+        tags: fields.tags,
         title: title.unwrap_or_default().to_string(),
         body: body.to_string(),
-    };
-    let mut in_tags = false;
-    for line in head.lines().filter(|l| !is_fence(l)) {
-        if let Some(tag) = line.trim().strip_prefix("- ").filter(|_| in_tags) {
-            note.tags.push(tag.trim().to_string());
-        } else {
-            in_tags = line.starts_with("tags:");
-            if let Some(v) = line.strip_prefix("created:") {
-                note.created = v.trim().to_string();
-            } else if let Some(v) = line.strip_prefix("priority:") {
-                note.priority = Some(v.trim().to_string());
-            }
-        }
-    }
-    Some(note)
+    })
 }
 
 pub fn load_all(data_dir: &Path) -> Vec<Note> {
@@ -105,10 +76,6 @@ pub fn load_all(data_dir: &Path) -> Vec<Note> {
         .collect();
     notes.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| a.path.cmp(&b.path)));
     notes
-}
-
-pub fn strip_frontmatter(content: &str) -> &str {
-    split_frontmatter(content).map_or(content, |(_, body)| body)
 }
 
 #[derive(Debug, PartialEq)]
@@ -163,40 +130,16 @@ pub fn new_note(data_dir: &Path, tags: &[String]) -> io::Result<PathBuf> {
     Ok(path)
 }
 
-fn map_frontmatter(content: &str, f: impl Fn(&str) -> Option<String>) -> String {
-    let Some((head, body)) = split_frontmatter(content) else {
-        return content.to_string();
-    };
-    let mut out = String::new();
-    for line in head.split_inclusive('\n') {
-        let bare = line.trim_end_matches(['\n', '\r']);
-        let mapped = if is_fence(line) { None } else { f(bare) };
-        match mapped {
-            Some(new) => {
-                out.push_str(&new);
-                out.push_str(&line[bare.len()..]);
-            }
-            None => out.push_str(line),
-        }
-    }
-    out.push_str(body);
-    out
-}
-
 pub fn clone_note(path: &Path) -> io::Result<PathBuf> {
     let content = fs::read_to_string(path)?;
-    let today = today();
-    let cloned = map_frontmatter(&content, |l| l.starts_with("created:").then(|| format!("created: {today}")));
+    let cloned = frontmatter::set_field(&content, "created", &today());
     let new = new_path(path.parent().unwrap_or(Path::new(".")));
     fs::write(&new, cloned)?;
     Ok(new)
 }
 
 pub fn mark_done(content: &str) -> String {
-    map_frontmatter(content, |l| {
-        let indent = &l[..l.len() - l.trim_start().len()];
-        (l.trim() == "- todo").then(|| format!("{indent}- done"))
-    })
+    frontmatter::replace_tag(content, TODO_TAG, "done")
 }
 
 pub struct JournalEntry {
@@ -283,13 +226,5 @@ mod tests {
     fn title_ignores_heading_level() {
         let n = parse_note(PathBuf::from("a.md"), "---\ncreated: x\n---\n\n## Sub title\n").unwrap();
         assert_eq!(n.title, "Sub title");
-    }
-
-    #[test]
-    fn body_strips_frontmatter_like_parse_reads_it() {
-        assert_eq!(strip_frontmatter("---\r\ncreated: x\r\n---\r\nbody\r\n"), "body\r\n");
-        assert_eq!(strip_frontmatter("---\ncreated: x\n---"), "");
-        let n = parse_note(PathBuf::from("a.md"), "---\r\ntags:\r\n  - work\r\n---\r\n# T\r\n").unwrap();
-        assert_eq!((n.tags.as_slice(), n.title.as_str(), n.body.as_str()), (["work".to_string()].as_slice(), "T", "# T\r\n"));
     }
 }

@@ -1,3 +1,4 @@
+mod frontmatter;
 mod notes;
 mod sync;
 mod theme;
