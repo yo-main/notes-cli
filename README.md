@@ -39,6 +39,7 @@ The prompt takes space-separated terms:
 
 - `+tag`: keep notes with a tag containing `tag` (case-insensitive).
 - `-tag`: drop notes with a tag containing `tag`.
+- `/word`: keep notes or journal entries whose body contains `word` (case-insensitive).
 - anything else: fuzzy match on the note line (`[created] [priority] #tags title`).
 
 Command-line arguments become the initial filters: `ratanote work` starts with `+work`; arguments starting with `+` or `-` are used as given. The newest notes are shown at the bottom.

@@ -157,8 +157,11 @@ impl App {
         let pattern = Pattern::parse(&q.text, CaseMatching::Ignore, Normalization::Smart);
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         let mut buf = vec![];
-        let newest_first =
-            entries.into_iter().filter(|e| pattern.score(Utf32Str::new(&e.search, &mut buf), &mut matcher).is_some());
+        let newest_first = entries.into_iter().filter(|e| {
+            let body = e.body.to_lowercase();
+            q.body.iter().all(|w| body.contains(w))
+                && pattern.score(Utf32Str::new(&e.search, &mut buf), &mut matcher).is_some()
+        });
         self.visible = newest_first.rev().collect();
         let max = self.visible.len().saturating_sub(1);
         self.table.select(Some(self.table.selected().unwrap_or(max).min(max)));
@@ -516,5 +519,17 @@ mod tests {
         let path = app.journal_path();
         assert_eq!(press(&mut app, KeyCode::Enter, KeyModifiers::NONE), Some(Action::Edit(path, Some(1))));
         assert!(press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL).is_none() && !app.confirm_delete);
+    }
+
+    #[test]
+    fn slash_searches_bodies_in_every_view() {
+        let mut app = app_with(&[TODO_NOTE, "---\ncreated: 2026-01-02\n---\n\n# B\nQuarterly budget\n"]);
+        fs::write(app.journal_path(), "### 2026-01-02\nbudget call\n### 2026-01-01\na\n").unwrap();
+        app.query = "/BUDGET".into();
+        app.reload();
+        assert_eq!(app.visible.iter().map(|e| e.cells[3].as_str()).collect::<Vec<_>>(), ["B"]);
+        app.view = View::Journal;
+        app.reset_filter();
+        assert_eq!(app.visible.iter().map(|e| e.cells[0].as_str()).collect::<Vec<_>>(), ["2026-01-02"]);
     }
 }

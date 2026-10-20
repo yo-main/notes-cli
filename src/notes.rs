@@ -82,16 +82,18 @@ pub fn load_all(data_dir: &Path) -> Vec<Note> {
 pub struct Query {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
+    pub body: Vec<String>,
     pub text: String,
 }
 
 pub fn parse_query(q: &str) -> Query {
-    let mut query = Query { include: vec![], exclude: vec![], text: String::new() };
+    let mut query = Query { include: vec![], exclude: vec![], body: vec![], text: String::new() };
     let mut text = vec![];
     for word in q.split_whitespace() {
-        match (word.strip_prefix('+'), word.strip_prefix('-')) {
-            (Some(t), _) if !t.is_empty() => query.include.push(t.to_string()),
-            (_, Some(t)) if !t.is_empty() => query.exclude.push(t.to_string()),
+        match (word.strip_prefix('+'), word.strip_prefix('-'), word.strip_prefix('/')) {
+            (Some(t), _, _) if !t.is_empty() => query.include.push(t.to_string()),
+            (_, Some(t), _) if !t.is_empty() => query.exclude.push(t.to_string()),
+            (_, _, Some(t)) if !t.is_empty() => query.body.push(t.to_lowercase()),
             _ => text.push(word),
         }
     }
@@ -189,8 +191,9 @@ mod tests {
 
     #[test]
     fn query_splits_tags_and_text() {
-        let q = parse_query("+work -done meet up");
-        assert_eq!(q, Query { include: vec!["work".into()], exclude: vec!["done".into()], text: "meet up".into() });
+        let q = parse_query("+work -done /Meet / up");
+        let body = vec!["meet".into()];
+        assert_eq!(q, Query { include: vec!["work".into()], exclude: vec!["done".into()], body, text: "/ up".into() });
         let n = parse_note(PathBuf::from("a.md"), NOTE).unwrap();
         assert!(parse_query("+WORK").matches_tag_filters(&n));
         assert!(parse_query("+wo").matches_tag_filters(&n));
