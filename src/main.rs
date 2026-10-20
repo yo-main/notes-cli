@@ -21,7 +21,7 @@ use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, HighlightSpacing, Padding, Paragraph, Row, Table, TableState, Wrap};
 
-use notes::{Config, JournalEntry, Note, TODO_TAG};
+use notes::{Config, JournalEntry, Note, Query, TODO_TAG};
 use theme::{Dracula, HIGHLIGHT_BG};
 
 const END_OF_FILE_LINE: usize = 100;
@@ -60,6 +60,15 @@ enum Action {
     Edit(PathBuf, Option<usize>),
 }
 
+struct Entry {
+    search: String,
+    body: String,
+    cells: Vec<String>,
+    path: PathBuf,
+    line: Option<usize>,
+    is_note: bool,
+}
+
 struct App {
     dir: PathBuf,
     config: Config,
@@ -68,7 +77,8 @@ struct App {
     cursor: usize,
     notes: Vec<Note>,
     journal: Vec<JournalEntry>,
-    visible: Vec<usize>,
+    visible: Vec<Entry>,
+    total: usize,
     table: TableState,
     status: String,
     confirm_delete: bool,
@@ -86,6 +96,7 @@ impl App {
             notes: vec![],
             journal: vec![],
             visible: vec![],
+            total: 0,
             table: TableState::default(),
             status: String::new(),
             confirm_delete: false,
@@ -109,25 +120,45 @@ impl App {
         self.refilter();
     }
 
-    fn refilter(&mut self) {
-        let q = notes::parse_query(&self.query);
-        let labels: Vec<(usize, String)> = match self.view {
-            View::Journal => self.journal.iter().enumerate().map(|(i, e)| (i, e.title.clone())).collect(),
+    fn entries(&self, q: &Query) -> Vec<Entry> {
+        match self.view {
+            View::Journal => self
+                .journal
+                .iter()
+                .map(|e| Entry {
+                    search: e.title.clone(),
+                    body: e.body.clone(),
+                    cells: vec![e.title.clone()],
+                    path: self.journal_path(),
+                    line: Some(e.line),
+                    is_note: false,
+                })
+                .collect(),
             view => self
                 .notes
                 .iter()
-                .enumerate()
-                .filter(|(_, n)| q.matches_tag_filters(n) && (view != View::Todo || n.has_tag(TODO_TAG)))
-                .map(|(i, n)| (i, n.search_text()))
+                .filter(|n| q.matches_tag_filters(n) && (view != View::Todo || n.has_tag(TODO_TAG)))
+                .map(|n| Entry {
+                    search: n.search_text(),
+                    body: n.body.clone(),
+                    cells: table_cells(n),
+                    path: n.path.clone(),
+                    line: None,
+                    is_note: true,
+                })
                 .collect(),
-        };
+        }
+    }
+
+    fn refilter(&mut self) {
+        let q = notes::parse_query(&self.query);
+        let entries = self.entries(&q);
+        self.total = entries.len();
         let pattern = Pattern::parse(&q.text, CaseMatching::Ignore, Normalization::Smart);
         let mut matcher = Matcher::new(nucleo_matcher::Config::DEFAULT);
         let mut buf = vec![];
-        let newest_first = labels
-            .iter()
-            .filter(|(_, l)| pattern.score(Utf32Str::new(l, &mut buf), &mut matcher).is_some())
-            .map(|(i, _)| *i);
+        let newest_first =
+            entries.into_iter().filter(|e| pattern.score(Utf32Str::new(&e.search, &mut buf), &mut matcher).is_some());
         self.visible = newest_first.rev().collect();
         let max = self.visible.len().saturating_sub(1);
         self.table.select(Some(self.table.selected().unwrap_or(max).min(max)));
@@ -138,15 +169,12 @@ impl App {
         self.refilter();
     }
 
-    fn selected_index(&self) -> Option<usize> {
-        self.table.selected().and_then(|i| self.visible.get(i).copied())
+    fn selected(&self) -> Option<&Entry> {
+        self.table.selected().and_then(|i| self.visible.get(i))
     }
 
-    fn selected_note(&self) -> Option<&Note> {
-        if self.view == View::Journal {
-            return None;
-        }
-        self.selected_index().map(|i| &self.notes[i])
+    fn selected_note(&self) -> Option<&Entry> {
+        self.selected().filter(|e| e.is_note)
     }
 
     fn tags_for_new_note(&self) -> Vec<String> {
@@ -192,12 +220,7 @@ fn edit(terminal: &mut DefaultTerminal, path: &Path, line: Option<usize>) -> io:
 }
 
 fn open_selected(app: &App) -> Option<Action> {
-    if app.view == View::Journal {
-        let i = app.selected_index()?;
-        Some(Action::Edit(app.journal_path(), Some(app.journal[i].line)))
-    } else {
-        app.selected_note().map(|n| Action::Edit(n.path.clone(), None))
-    }
+    app.selected().map(|e| Action::Edit(e.path.clone(), e.line))
 }
 
 fn create_entry(app: &App) -> io::Result<Action> {
@@ -302,11 +325,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     ])
     .areas(frame.area());
 
-    let rows: Vec<Vec<String>> = app
-        .visible
-        .iter()
-        .map(|&i| if app.view == View::Journal { vec![app.journal[i].title.clone()] } else { table_cells(&app.notes[i]) })
-        .collect();
+    let rows: Vec<Vec<String>> = app.visible.iter().map(|e| e.cells.clone()).collect();
     let ncols = rows.first().map_or(1, Vec::len);
     let widths: Vec<Constraint> = (0..ncols)
         .map(|c| match c + 1 == ncols {
@@ -332,12 +351,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     };
     frame.render_widget(Paragraph::new(help), header);
 
-    let total = match app.view {
-        View::All => app.notes.len(),
-        View::Todo => app.notes.iter().filter(|n| n.has_tag(TODO_TAG)).count(),
-        View::Journal => app.journal.len(),
-    };
-    let mut line = Line::from(Span::from(format!("  {}/{total} · ", app.visible.len())).dim());
+    let mut line = Line::from(Span::from(format!("  {}/{} · ", app.visible.len(), app.total)).dim());
     for (view, label) in [(View::All, "all"), (View::Todo, "todo"), (View::Journal, "journal")] {
         let span = Span::from(format!(" {label} "));
         line.push_span(if view == app.view { span.reversed().bold() } else { span.dim() });
@@ -352,11 +366,7 @@ fn draw(frame: &mut ratatui::Frame, app: &mut App) {
     frame.set_cursor_position((prompt.x + before as u16, prompt.y));
     frame.render_widget(Paragraph::new(line), prompt);
 
-    let body = match (app.view, app.selected_index()) {
-        (View::Journal, Some(i)) => app.journal[i].body.as_str(),
-        (_, Some(i)) => app.notes[i].body.as_str(),
-        _ => "",
-    };
+    let body = app.selected().map_or("", |e| e.body.as_str());
     let text = tui_markdown::from_str_with_options(body, &MARKDOWN);
     let block = Block::new().borders(Borders::TOP).border_style(Style::new().dim()).padding(Padding::new(2, 2, 1, 0));
     frame.render_widget(Paragraph::new(text).block(block).wrap(Wrap { trim: false }), preview);
@@ -494,5 +504,17 @@ mod tests {
         press(&mut app, KeyCode::Backspace, KeyModifiers::NONE);
         assert_eq!((app.query.as_str(), app.cursor), ("a", 1));
         assert_eq!(press(&mut app, KeyCode::Esc, KeyModifiers::NONE), Some(Action::Quit));
+    }
+
+    #[test]
+    fn enter_in_journal_opens_entry_line() {
+        let mut app = app_with(&[]);
+        fs::write(app.journal_path(), "### 2026-01-02\nb\n### 2026-01-01\na\n").unwrap();
+        app.reload();
+        app.view = View::Journal;
+        app.reset_filter();
+        let path = app.journal_path();
+        assert_eq!(press(&mut app, KeyCode::Enter, KeyModifiers::NONE), Some(Action::Edit(path, Some(1))));
+        assert!(press(&mut app, KeyCode::Char('d'), KeyModifiers::CONTROL).is_none() && !app.confirm_delete);
     }
 }
